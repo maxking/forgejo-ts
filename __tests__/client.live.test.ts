@@ -138,9 +138,9 @@ describeIfLive('ForgejoClient - live integration tests', () => {
       expect(Array.isArray(issues)).toBe(true);
       const issueTitles = issues.map(i => i.title);
       expect(issueTitles).toContain('Test Issue');
-      // Ensure PRs are filtered out
-      const prTitles = issues.filter(i => 'pull_request' in i);
-      expect(prTitles).toHaveLength(0);
+      // Ensure PRs are filtered out (Forgejo returns pull_request: null for issues)
+      const prsInList = issues.filter(i => i.pull_request);
+      expect(prsInList).toHaveLength(0);
     });
   });
 
