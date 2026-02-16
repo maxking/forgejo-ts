@@ -36,7 +36,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "prepare": "npm run build",
+    "prepare": "tsc --version >/dev/null 2>&1 && npm run build || true",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
