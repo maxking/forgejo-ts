@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  push:
+    branches: [ master, dev ]
+  pull_request:
+    branches: [ master, dev ]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        node-version: ['18', '20']
+
+    runs-on: docker
+    container: node:${{ matrix.node-version }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint
+      run: npm run lint
+
+    - name: Run tests
+      run: npm run test:coverage

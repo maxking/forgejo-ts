@@ -33,9 +33,10 @@
     "build": "npm run build:esm && npm run build:cjs",
     "build:esm": "tsc -p tsconfig.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
+    "test": "jest --testPathIgnorePatterns='live'",
+    "test:watch": "jest --watch --testPathIgnorePatterns='live'",
+    "test:coverage": "jest --coverage --testPathIgnorePatterns='live'",
+    "test:live": "jest --testPathPattern='live'",
     "prepare": "tsc --version >/dev/null 2>&1 && npm run build || true",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
