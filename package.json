@@ -7,22 +7,8 @@
     "type": "git",
     "url": "https://git.araj.me/maxking/forgejo-ts.git"
   },
-  "type": "module",
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/esm/index.d.ts",
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.ts",
-        "default": "./dist/cjs/index.js"
-      }
-    }
-  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
@@ -30,9 +16,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "npm run build:esm && npm run build:cjs",
-    "build:esm": "tsc -p tsconfig.json",
-    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build": "tsc",
     "test": "jest --testPathIgnorePatterns='live'",
     "test:watch": "jest --watch --testPathIgnorePatterns='live'",
     "test:coverage": "jest --coverage --testPathIgnorePatterns='live'",
