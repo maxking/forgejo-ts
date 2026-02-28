@@ -5,7 +5,7 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 ## Features
 
 - Zero external dependencies (uses Node.js built-in `fetch`)
-- Dual ESM + CommonJS builds
+- TypeScript declarations with Node.js 18+ runtime support
 - Full TypeScript types for all API responses
 - Injectable logger interface
 - Typed error classes (`ForgejoApiError`, `ForgejoNetworkError`)
@@ -15,7 +15,10 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 ## Installation
 
 ```bash
-# From git (recommended for now)
+# If published on npm
+npm install forgejo-ts
+
+# Or directly from git
 npm install git+https://git.araj.me/maxking/forgejo-ts.git
 ```
 
@@ -144,12 +147,18 @@ const client = new ForgejoClient({
 
 ```bash
 npm install
-npm run build       # dual ESM + CJS build
-npm test            # unit tests (68 tests)
-npm run test:coverage  # with coverage report
-npm run test:live   # live tests (requires FORGEJO_TEST_URL and FORGEJO_TEST_TOKEN)
-npm run lint        # type check
+npm run build          # compile TypeScript to dist/
+npm test               # unit tests
+npm run test:coverage  # unit tests with coverage thresholds
+npm run test:live      # live tests (requires FORGEJO_TEST_URL and FORGEJO_TEST_TOKEN)
+npm run lint           # type check
 ```
+
+## Open Source Readiness
+
+- Contributing guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Security policy: [SECURITY.md](./SECURITY.md)
+- License: Apache-2.0
 
 ## License
 
