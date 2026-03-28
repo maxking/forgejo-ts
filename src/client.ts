@@ -4,7 +4,7 @@ import {
   PullRequest, PullRequestListItem, PullRequestFile,
   FileContentsResponse, CommitStatus, PullRequestReview, PullRequestCommit,
   Issue, IssueListItem, IssueComment, TimelineEvent,
-  ActionTasksResponse, WorkflowRun, WorkflowJobsResponse,
+  ActionTasksResponse, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef,
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
@@ -363,15 +363,15 @@ export class ForgejoClient {
     return this.request<WorkflowJobsResponse>(`/repos/${owner}/${repo}/actions/runs/${runId}/jobs`);
   }
 
-  async getWorkflowLogs(owner: string, repo: string, runNumber: number, jobIndex = 0): Promise<string> {
-    const url = `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobIndex}/logs`;
+  async getWorkflowLogs(owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number = 0): Promise<string> {
+    const url = `${this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef)}/logs`;
     return this.webRequest(url);
   }
 
   async getJobSteps(
-    owner: string, repo: string, runNumber: number, jobIndex = 0
+    owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number = 0
   ): Promise<{ summary: string; duration: string; status: string }[]> {
-    const url = `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobIndex}`;
+    const url = this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef);
     const html = await this.webRequest(url);
 
     const match = html.match(/data-initial-post-response="([^"]*)"/);
@@ -395,6 +395,26 @@ export class ForgejoClient {
       duration: s.duration ?? '',
       status: s.status ?? 'unknown'
     }));
+  }
+
+  private resolveWorkflowJobUrl(owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number): string {
+    if (typeof jobRef === 'number') {
+      return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef}`;
+    }
+
+    if (jobRef.jobHtmlUrl) {
+      return new URL(jobRef.jobHtmlUrl, `${this.instanceUrl}/`).toString();
+    }
+
+    if (jobRef.jobId !== undefined) {
+      return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobId}`;
+    }
+
+    if (jobRef.jobIndex !== undefined) {
+      return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobIndex}`;
+    }
+
+    throw new Error('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
   }
 
   async rerunWorkflow(owner: string, repo: string, runId: number): Promise<void> {

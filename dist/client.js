@@ -284,12 +284,12 @@ class ForgejoClient {
     async getWorkflowJobs(owner, repo, runId) {
         return this.request(`/repos/${owner}/${repo}/actions/runs/${runId}/jobs`);
     }
-    async getWorkflowLogs(owner, repo, runNumber, jobIndex = 0) {
-        const url = `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobIndex}/logs`;
+    async getWorkflowLogs(owner, repo, runNumber, jobRef = 0) {
+        const url = `${this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef)}/logs`;
         return this.webRequest(url);
     }
-    async getJobSteps(owner, repo, runNumber, jobIndex = 0) {
-        const url = `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobIndex}`;
+    async getJobSteps(owner, repo, runNumber, jobRef = 0) {
+        const url = this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef);
         const html = await this.webRequest(url);
         const match = html.match(/data-initial-post-response="([^"]*)"/);
         if (!match)
@@ -308,6 +308,21 @@ class ForgejoClient {
             duration: s.duration ?? '',
             status: s.status ?? 'unknown'
         }));
+    }
+    resolveWorkflowJobUrl(owner, repo, runNumber, jobRef) {
+        if (typeof jobRef === 'number') {
+            return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef}`;
+        }
+        if (jobRef.jobHtmlUrl) {
+            return new URL(jobRef.jobHtmlUrl, `${this.instanceUrl}/`).toString();
+        }
+        if (jobRef.jobId !== undefined) {
+            return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobId}`;
+        }
+        if (jobRef.jobIndex !== undefined) {
+            return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobIndex}`;
+        }
+        throw new Error('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
     }
     async rerunWorkflow(owner, repo, runId) {
         await this.requestWithBody('POST', `/repos/${owner}/${repo}/actions/runs/${runId}/rerun`);

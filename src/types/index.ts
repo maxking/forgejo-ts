@@ -19,6 +19,7 @@ export {
   WorkflowRunListItem,
   WorkflowRun,
   WorkflowJob,
+  WorkflowJobRef,
   WorkflowStep,
   WorkflowJobsResponse,
   WorkflowRunStatus,

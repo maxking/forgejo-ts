@@ -386,6 +386,44 @@ describe('getWorkflowLogs', () => {
       expect.any(Object)
     );
   });
+
+  test('prefers server-provided html url when available', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobId: 352,
+      jobHtmlUrl: 'https://git.example.com/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('uses job id when html url is unavailable', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, { jobId: 352 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('supports relative html urls from self-hosted instances', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobHtmlUrl: '/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
 });
 
 describe('getJobSteps', () => {
@@ -411,6 +449,30 @@ describe('getJobSteps', () => {
     mockFetch.mockResolvedValueOnce(textResponse('<html></html>'));
     const result = await client.getJobSteps('owner', 'repo', 5);
     expect(result).toEqual([]);
+  });
+
+  test('uses server-provided html url when loading steps', async () => {
+    const stepsData = {
+      state: { currentJob: { steps: [
+        { summary: 'Checkout', duration: '2s', status: 'success' }
+      ]}}
+    };
+    const encoded = JSON.stringify(stepsData).replace(/"/g, '&#34;');
+    const html = `<div data-initial-post-response="${encoded}"></div>`;
+    mockFetch.mockResolvedValueOnce(textResponse(html));
+
+    const result = await client.getJobSteps('owner', 'repo', 5, {
+      jobId: 352,
+      jobHtmlUrl: 'https://git.example.com/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(result).toEqual([
+      { summary: 'Checkout', duration: '2s', status: 'success' }
+    ]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352',
+      expect.any(Object)
+    );
   });
 });
 
@@ -656,6 +718,11 @@ describe('getJobSteps edge cases', () => {
     mockFetch.mockResolvedValueOnce(textResponse(html));
     const result = await client.getJobSteps('owner', 'repo', 5);
     expect(result).toEqual([{ summary: 'Unknown step', duration: '', status: 'unknown' }]);
+  });
+
+  test('throws when job ref is missing usable identifiers', async () => {
+    await expect(client.getWorkflowLogs('owner', 'repo', 5, {}))
+      .rejects.toThrow('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
   });
 });
 

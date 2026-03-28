@@ -1,5 +1,5 @@
 import { ForgejoLogger } from './logger.js';
-import { PullRequest, PullRequestListItem, PullRequestFile, CommitStatus, PullRequestReview, PullRequestCommit, Issue, IssueListItem, IssueComment, TimelineEvent, ActionTasksResponse, WorkflowRun, WorkflowJobsResponse, ReviewComment, PullReview, CreatePullReviewOptions, Tag, CreateTagOptions, Release, CreateReleaseOptions } from './types/index.js';
+import { PullRequest, PullRequestListItem, PullRequestFile, CommitStatus, PullRequestReview, PullRequestCommit, Issue, IssueListItem, IssueComment, TimelineEvent, ActionTasksResponse, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef, ReviewComment, PullReview, CreatePullReviewOptions, Tag, CreateTagOptions, Release, CreateReleaseOptions } from './types/index.js';
 export interface ForgejoClientOptions {
     instanceUrl: string;
     token?: string;
@@ -60,12 +60,13 @@ export declare class ForgejoClient {
     }): Promise<ActionTasksResponse>;
     getWorkflowRun(owner: string, repo: string, runId: number): Promise<WorkflowRun>;
     getWorkflowJobs(owner: string, repo: string, runId: number): Promise<WorkflowJobsResponse>;
-    getWorkflowLogs(owner: string, repo: string, runNumber: number, jobIndex?: number): Promise<string>;
-    getJobSteps(owner: string, repo: string, runNumber: number, jobIndex?: number): Promise<{
+    getWorkflowLogs(owner: string, repo: string, runNumber: number, jobRef?: WorkflowJobRef | number): Promise<string>;
+    getJobSteps(owner: string, repo: string, runNumber: number, jobRef?: WorkflowJobRef | number): Promise<{
         summary: string;
         duration: string;
         status: string;
     }[]>;
+    private resolveWorkflowJobUrl;
     rerunWorkflow(owner: string, repo: string, runId: number): Promise<void>;
     getCommitStatuses(owner: string, repo: string, sha: string): Promise<CommitStatus[]>;
     listTags(owner: string, repo: string): Promise<Tag[]>;

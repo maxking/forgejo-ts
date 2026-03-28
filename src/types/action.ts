@@ -38,6 +38,12 @@ export interface WorkflowJob {
   html_url?: string;
 }
 
+export interface WorkflowJobRef {
+  jobId?: number;
+  jobHtmlUrl?: string;
+  jobIndex?: number;
+}
+
 export interface WorkflowStep {
   name: string;
   status: WorkflowRunStatus;
