@@ -397,13 +397,25 @@ export class ForgejoClient {
     }));
   }
 
+  /**
+   * Resolve the most reliable job page URL in priority order:
+   * 1) server-provided jobHtmlUrl, 2) API jobId, 3) legacy positional jobIndex.
+   * This preserves backward compatibility while preferring instance-authored URLs.
+   */
   private resolveWorkflowJobUrl(owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number): string {
     if (typeof jobRef === 'number') {
       return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef}`;
     }
 
     if (jobRef.jobHtmlUrl) {
-      return new URL(jobRef.jobHtmlUrl, `${this.instanceUrl}/`).toString();
+      const resolvedUrl = new URL(jobRef.jobHtmlUrl, `${this.instanceUrl}/`);
+      const instanceOrigin = new URL(this.instanceUrl).origin;
+
+      if (resolvedUrl.origin !== instanceOrigin) {
+        throw new Error(`Workflow job URL must match Forgejo instance origin: ${instanceOrigin}`);
+      }
+
+      return resolvedUrl.toString().replace(/\/+$/, '');
     }
 
     if (jobRef.jobId !== undefined) {

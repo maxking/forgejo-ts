@@ -66,6 +66,11 @@ export declare class ForgejoClient {
         duration: string;
         status: string;
     }[]>;
+    /**
+     * Resolve the most reliable job page URL in priority order:
+     * 1) server-provided jobHtmlUrl, 2) API jobId, 3) legacy positional jobIndex.
+     * This preserves backward compatibility while preferring instance-authored URLs.
+     */
     private resolveWorkflowJobUrl;
     rerunWorkflow(owner: string, repo: string, runId: number): Promise<void>;
     getCommitStatuses(owner: string, repo: string, sha: string): Promise<CommitStatus[]>;
