@@ -386,6 +386,121 @@ describe('getWorkflowLogs', () => {
       expect.any(Object)
     );
   });
+
+  test('prefers server-provided html url when available', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobId: 352,
+      jobHtmlUrl: 'https://git.example.com/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('supports legacy numeric job refs', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, 42);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/42/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('uses job id when html url is unavailable', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, { jobId: 352 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('uses jobIndex fallback when only legacy index is available', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, { jobIndex: 0 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/0/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('preserves falsy job id values', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, { jobId: 0 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/0/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('preserves falsy job index values', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, { jobIndex: 0 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/0/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('supports relative html urls from self-hosted instances', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobHtmlUrl: '/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('normalizes trailing slashes in job html url', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobHtmlUrl: '/owner/repo/actions/runs/5/jobs/352/'
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('ignores empty html url and falls back to job id', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
+
+    await client.getWorkflowLogs('owner', 'repo', 5, {
+      jobHtmlUrl: '',
+      jobId: 352
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      expect.any(Object)
+    );
+  });
+
+  test('rejects job html urls from another origin', async () => {
+    await expect(client.getWorkflowLogs('owner', 'repo', 5, {
+      jobHtmlUrl: 'https://evil.com/owner/repo/actions/runs/5/jobs/352'
+    })).rejects.toThrow('Workflow job URL must match Forgejo instance origin: https://git.example.com');
+  });
 });
 
 describe('getJobSteps', () => {
@@ -411,6 +526,30 @@ describe('getJobSteps', () => {
     mockFetch.mockResolvedValueOnce(textResponse('<html></html>'));
     const result = await client.getJobSteps('owner', 'repo', 5);
     expect(result).toEqual([]);
+  });
+
+  test('uses server-provided html url when loading steps', async () => {
+    const stepsData = {
+      state: { currentJob: { steps: [
+        { summary: 'Checkout', duration: '2s', status: 'success' }
+      ]}}
+    };
+    const encoded = JSON.stringify(stepsData).replace(/"/g, '&#34;');
+    const html = `<div data-initial-post-response="${encoded}"></div>`;
+    mockFetch.mockResolvedValueOnce(textResponse(html));
+
+    const result = await client.getJobSteps('owner', 'repo', 5, {
+      jobId: 352,
+      jobHtmlUrl: 'https://git.example.com/owner/repo/actions/runs/5/jobs/352'
+    });
+
+    expect(result).toEqual([
+      { summary: 'Checkout', duration: '2s', status: 'success' }
+    ]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/352',
+      expect.any(Object)
+    );
   });
 });
 
@@ -656,6 +795,11 @@ describe('getJobSteps edge cases', () => {
     mockFetch.mockResolvedValueOnce(textResponse(html));
     const result = await client.getJobSteps('owner', 'repo', 5);
     expect(result).toEqual([{ summary: 'Unknown step', duration: '', status: 'unknown' }]);
+  });
+
+  test('throws when job ref is missing usable identifiers', async () => {
+    await expect(client.getWorkflowLogs('owner', 'repo', 5, {}))
+      .rejects.toThrow('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
   });
 });
 
