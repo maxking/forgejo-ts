@@ -40,6 +40,7 @@ export interface WorkflowJob {
 
 export interface WorkflowJobRef {
   jobId?: number;
+  jobName?: string;
   jobHtmlUrl?: string;
   jobIndex?: number;
 }
