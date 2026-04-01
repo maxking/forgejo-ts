@@ -1,4 +1,6 @@
 import { ForgejoClient, ForgejoApiError, ForgejoNetworkError } from '../src/index';
+import * as fs from 'fs';
+import * as path from 'path';
 
 let mockFetch: jest.MockedFunction<typeof fetch>;
 let client: ForgejoClient;
@@ -28,6 +30,13 @@ function textResponse(text: string, status = 200) {
     text: async () => text,
     headers: { get: () => 'text/html' },
   } as unknown as Response;
+}
+
+/** HTML response that simulates a Forgejo job page with run.jobs for job-id mapping */
+function jobMappingHtml(jobs: { id: number; name: string }[]): string {
+  const data = { state: { run: { jobs }, currentJob: { steps: [] } } };
+  const encoded = JSON.stringify(data).replace(/"/g, '&#34;');
+  return `<div data-initial-post-response="${encoded}"></div>`;
 }
 
 function emptyResponse(status = 204) {
@@ -412,13 +421,18 @@ describe('getWorkflowLogs', () => {
     );
   });
 
-  test('uses job id when html url is unavailable', async () => {
+  test('resolves job id to positional index via scraping', async () => {
+    // First call: scrape jobs/0 to get the mapping
+    mockFetch.mockResolvedValueOnce(textResponse(
+      jobMappingHtml([{ id: 100, name: 'build' }, { id: 352, name: 'test' }])
+    ));
+    // Second call: actual logs request using resolved index
     mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
 
     await client.getWorkflowLogs('owner', 'repo', 5, { jobId: 352 });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/1/logs',
       expect.any(Object)
     );
   });
@@ -434,7 +448,11 @@ describe('getWorkflowLogs', () => {
     );
   });
 
-  test('preserves falsy job id values', async () => {
+  test('resolves falsy job id (0) via mapping', async () => {
+    // jobId: 0 is a valid database ID; scrape mapping to resolve it
+    mockFetch.mockResolvedValueOnce(textResponse(
+      jobMappingHtml([{ id: 0, name: 'first-job' }, { id: 1, name: 'second-job' }])
+    ));
     mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
 
     await client.getWorkflowLogs('owner', 'repo', 5, { jobId: 0 });
@@ -482,7 +500,11 @@ describe('getWorkflowLogs', () => {
     );
   });
 
-  test('ignores empty html url and falls back to job id', async () => {
+  test('ignores empty html url and resolves job id via mapping', async () => {
+    // Empty jobHtmlUrl is falsy, so resolveJobRef kicks in for jobId
+    mockFetch.mockResolvedValueOnce(textResponse(
+      jobMappingHtml([{ id: 100, name: 'build' }, { id: 352, name: 'deploy' }])
+    ));
     mockFetch.mockResolvedValueOnce(textResponse('log line 1\nlog line 2'));
 
     await client.getWorkflowLogs('owner', 'repo', 5, {
@@ -491,7 +513,7 @@ describe('getWorkflowLogs', () => {
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://git.example.com/owner/repo/actions/runs/5/jobs/352/logs',
+      'https://git.example.com/owner/repo/actions/runs/5/jobs/1/logs',
       expect.any(Object)
     );
   });
@@ -778,6 +800,139 @@ describe('error handling', () => {
   });
 });
 
+describe('job index resolution from scraped run data', () => {
+  // Minimal fixture based on real Forgejo response from
+  // actions/runs/471/jobs/2/attempt/1 (sensitive data removed).
+  // The run has 3 jobs; the tasks API returns database IDs (51313–51315)
+  // but Forgejo URLs use positional indices (0, 1, 2).
+  const run471Jobs = [
+    { id: 51313, name: 'test (18)', status: 'success' },
+    { id: 51314, name: 'test (20)', status: 'success' },
+    { id: 51315, name: 'smoke-test-vsix', status: 'success' },
+  ];
+
+  function makeJobPageHtml(
+    jobs: { id: number; name: string; status: string }[],
+    steps: { summary: string; duration: string; status: string }[]
+  ): string {
+    const data = {
+      state: {
+        run: { jobs, status: 'success', done: true },
+        currentJob: { steps }
+      }
+    };
+    const encoded = JSON.stringify(data).replace(/"/g, '&#34;');
+    return `<div data-initial-post-response="${encoded}"></div>`;
+  }
+
+  const smokeTestSteps = [
+    { summary: 'Set up job', duration: '2s', status: 'success' },
+    { summary: 'actions/checkout@v4', duration: '1s', status: 'success' },
+    { summary: 'Install dependencies', duration: '1m13s', status: 'success' },
+    { summary: 'Package and verify .vsix contents', duration: '6s', status: 'success' },
+    { summary: 'Complete job', duration: '1s', status: 'success' },
+  ];
+
+  test('getJobSteps resolves jobId 51315 to positional index 2', async () => {
+    // 1st fetch: scrape jobs/0 page for the mapping
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, [])
+    ));
+    // 2nd fetch: scrape jobs/2 page for the actual steps
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, smokeTestSteps)
+    ));
+
+    const steps = await client.getJobSteps('owner', 'repo', 471, { jobId: 51315 });
+
+    // Mapping scrape should target jobs/0
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      'https://git.example.com/owner/repo/actions/runs/471/jobs/0/attempt/1'
+    );
+    // Steps scrape should target jobs/2 (not jobs/51315!)
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      'https://git.example.com/owner/repo/actions/runs/471/jobs/2'
+    );
+    expect(steps).toEqual(smokeTestSteps);
+  });
+
+  test('caches job mapping across calls for the same run', async () => {
+    // First call populates cache
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, [])
+    ));
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, smokeTestSteps)
+    ));
+    await client.getJobSteps('owner', 'repo', 471, { jobId: 51315 });
+
+    // Second call for a different job in the same run — no mapping scrape
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, [
+        { summary: 'Set up job', duration: '2s', status: 'success' },
+        { summary: 'Run unit tests', duration: '13s', status: 'success' },
+      ])
+    ));
+    const steps = await client.getJobSteps('owner', 'repo', 471, { jobId: 51313 });
+
+    // Only 1 new fetch (the actual job page), no mapping re-scrape
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // Should resolve jobId 51313 → index 0
+    expect(mockFetch.mock.calls[2][0]).toBe(
+      'https://git.example.com/owner/repo/actions/runs/471/jobs/0'
+    );
+    expect(steps).toHaveLength(2);
+  });
+
+  test('getWorkflowLogs resolves jobId to positional index', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse(
+      makeJobPageHtml(run471Jobs, [])
+    ));
+    mockFetch.mockResolvedValueOnce(textResponse('step 1 log output'));
+
+    await client.getWorkflowLogs('owner', 'repo', 471, { jobId: 51314 });
+
+    // Should resolve jobId 51314 → index 1
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      'https://git.example.com/owner/repo/actions/runs/471/jobs/1/logs'
+    );
+  });
+
+  // Reproduces the real bug: the /actions/tasks API returns task IDs (43111–43113)
+  // while the scraped web page returns job IDs (51313–51315). These are different
+  // ID spaces, so id-based lookup fails. Resolution must fall back to job name.
+  // Uses real HTML fixtures scraped from git.araj.me/maxking/forgejo-vscode/actions/runs/471.
+  test('falls back to name when task IDs differ from scraped job IDs', async () => {
+    const fixturesDir = path.join(__dirname, 'fixtures');
+    const mappingHtml = fs.readFileSync(path.join(fixturesDir, 'run-471-jobs-0.html'), 'utf8');
+    const smokeJobHtml = fs.readFileSync(path.join(fixturesDir, 'run-471-jobs-2.html'), 'utf8');
+
+    // 1st fetch: scrape jobs/0/attempt/1 for the mapping
+    mockFetch.mockResolvedValueOnce(textResponse(mappingHtml));
+    // 2nd fetch: scrape jobs/2 for the actual smoke-test-vsix steps
+    mockFetch.mockResolvedValueOnce(textResponse(smokeJobHtml));
+
+    // Pass task ID 43113 (from /actions/tasks) which does NOT match any
+    // scraped job ID (51315) — but the name "smoke-test-vsix" matches index 2
+    const steps = await client.getJobSteps('owner', 'repo', 471, {
+      jobId: 43113,
+      jobName: 'smoke-test-vsix'
+    });
+
+    // Should resolve via name to jobs/2
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      'https://git.example.com/owner/repo/actions/runs/471/jobs/2'
+    );
+    expect(steps).toEqual([
+      { summary: 'Set up job', duration: '2s', status: 'success' },
+      { summary: 'actions/checkout@v4', duration: '1s', status: 'success' },
+      { summary: 'Install dependencies', duration: '1m13s', status: 'success' },
+      { summary: 'Package and verify .vsix contents', duration: '6s', status: 'success' },
+      { summary: 'Complete job', duration: '1s', status: 'success' },
+    ]);
+  });
+});
+
 describe('getJobSteps edge cases', () => {
   test('returns empty when steps is not an array', async () => {
     const data = { state: { currentJob: { steps: 'not-an-array' } } };
@@ -799,7 +954,7 @@ describe('getJobSteps edge cases', () => {
 
   test('throws when job ref is missing usable identifiers', async () => {
     await expect(client.getWorkflowLogs('owner', 'repo', 5, {}))
-      .rejects.toThrow('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
+      .rejects.toThrow('Workflow job reference requires jobHtmlUrl or jobIndex');
   });
 });
 

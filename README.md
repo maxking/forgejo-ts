@@ -100,7 +100,8 @@ new ForgejoClient(options: {
 | | `getWorkflowRun(owner, repo, runId)` | Get run details |
 | | `getWorkflowJobs(owner, repo, runId)` | Get jobs for a run |
 | | `getWorkflowLogs(owner, repo, runNumber, jobIndex?)` | Fetch job logs |
-| | `getJobSteps(owner, repo, runNumber, jobIndex?)` | Parse step summaries |
+| | `getJobSteps(owner, repo, runNumber, jobRef?)` | Parse step summaries |
+| | `getRunJobMapping(owner, repo, runNumber)` | Map job database IDs to positional indices |
 | | `rerunWorkflow(owner, repo, runId)` | Re-run a workflow |
 | | `getCommitStatuses(owner, repo, sha)` | Get commit statuses |
 | **Tags** | | |
@@ -142,6 +143,16 @@ const client = new ForgejoClient({
 - **`ForgejoApiError`** -- HTTP error from the API. Has `statusCode`, `statusText`, `responseBody`.
 - **`ForgejoNetworkError`** -- Network/timeout error. Has `url`, `cause`.
 - Both extend `ForgejoError` which extends `Error`.
+
+## Changelog
+
+### 0.3.0
+
+- Fix `getJobSteps`/`getWorkflowLogs` returning wrong job's data by auto-resolving database job IDs to positional indices via scraping
+
+### 0.2.1
+
+- Initial public release
 
 ## Development
 

@@ -22,6 +22,8 @@ export class ForgejoClient {
   private readonly token: string;
   private readonly logger: ForgejoLogger;
   private readonly timeout: number;
+  /** Cache of run job mappings, keyed by "owner/repo/runNumber" */
+  private readonly jobIndexCache = new Map<string, { byId: Map<number, number>; byName: Map<string, number> }>();
 
   constructor(options: ForgejoClientOptions) {
     this.instanceUrl = options.instanceUrl.replace(/\/+$/, '');
@@ -364,14 +366,16 @@ export class ForgejoClient {
   }
 
   async getWorkflowLogs(owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number = 0): Promise<string> {
-    const url = `${this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef)}/logs`;
+    const resolved = await this.resolveJobRef(owner, repo, runNumber, jobRef);
+    const url = `${this.resolveWorkflowJobUrl(owner, repo, runNumber, resolved)}/logs`;
     return this.webRequest(url);
   }
 
   async getJobSteps(
     owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number = 0
   ): Promise<{ summary: string; duration: string; status: string }[]> {
-    const url = this.resolveWorkflowJobUrl(owner, repo, runNumber, jobRef);
+    const resolved = await this.resolveJobRef(owner, repo, runNumber, jobRef);
+    const url = this.resolveWorkflowJobUrl(owner, repo, runNumber, resolved);
     const html = await this.webRequest(url);
 
     const match = html.match(/data-initial-post-response="([^"]*)"/);
@@ -398,9 +402,91 @@ export class ForgejoClient {
   }
 
   /**
+   * If jobRef contains only a jobId/jobName (no jobHtmlUrl or jobIndex), resolve
+   * to a positional index via getRunJobMapping(). Tries id first, then name.
+   */
+  private async resolveJobRef(
+    owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number
+  ): Promise<WorkflowJobRef | number> {
+    if (typeof jobRef === 'number') return jobRef;
+    if (jobRef.jobHtmlUrl || jobRef.jobIndex !== undefined) return jobRef;
+    if (jobRef.jobId === undefined && jobRef.jobName === undefined) return jobRef;
+
+    const mapping = await this.getRunJobMapping(owner, repo, runNumber);
+
+    if (jobRef.jobId !== undefined) {
+      const index = mapping.byId.get(jobRef.jobId);
+      if (index !== undefined) {
+        return { ...jobRef, jobIndex: index };
+      }
+    }
+
+    if (jobRef.jobName !== undefined) {
+      const index = mapping.byName.get(jobRef.jobName);
+      if (index !== undefined) {
+        return { ...jobRef, jobIndex: index };
+      }
+    }
+
+    this.logger.warn(`Could not resolve job ref to positional index for run ${runNumber}`, jobRef);
+    return jobRef;
+  }
+
+  /**
+   * Scrape the first job page of a run to discover the ordered job list.
+   * Returns maps of job-id → positional index and job-name → positional index.
+   * Results are cached per run so repeated calls don't re-scrape.
+   */
+  async getRunJobMapping(owner: string, repo: string, runNumber: number): Promise<{ byId: Map<number, number>; byName: Map<string, number> }> {
+    const cacheKey = `${owner}/${repo}/${runNumber}`;
+    const cached = this.jobIndexCache.get(cacheKey);
+    if (cached) return cached;
+
+    const empty = { byId: new Map<number, number>(), byName: new Map<string, number>() };
+
+    const url = `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/0/attempt/1`;
+    const html = await this.webRequest(url);
+    const match = html.match(/data-initial-post-response="([^"]*)"/);
+    if (!match) {
+      this.logger.warn('Could not scrape job mapping for run', runNumber);
+      return empty;
+    }
+
+    const jsonStr = match[1]
+      .replace(/&#34;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+
+    const data = JSON.parse(jsonStr) as {
+      state?: { run?: { jobs?: { id?: number; name?: string }[] } }
+    };
+
+    const jobs = data.state?.run?.jobs;
+    const byId = new Map<number, number>();
+    const byName = new Map<string, number>();
+    if (Array.isArray(jobs)) {
+      for (let i = 0; i < jobs.length; i++) {
+        if (jobs[i].id !== undefined) {
+          byId.set(jobs[i].id!, i);
+        }
+        if (jobs[i].name !== undefined) {
+          byName.set(jobs[i].name!, i);
+        }
+      }
+    }
+
+    const mapping = { byId, byName };
+    this.jobIndexCache.set(cacheKey, mapping);
+    return mapping;
+  }
+
+  /**
    * Resolve the most reliable job page URL in priority order:
-   * 1) server-provided jobHtmlUrl, 2) API jobId, 3) legacy positional jobIndex.
-   * This preserves backward compatibility while preferring instance-authored URLs.
+   * 1) server-provided jobHtmlUrl, 2) positional jobIndex, 3) plain number.
+   *
+   * Note: jobId (database ID) is NOT usable as a URL path segment — Forgejo
+   * URLs use positional indices. Use getRunJobMapping() to resolve jobId first.
    */
   private resolveWorkflowJobUrl(owner: string, repo: string, runNumber: number, jobRef: WorkflowJobRef | number): string {
     if (typeof jobRef === 'number') {
@@ -418,15 +504,11 @@ export class ForgejoClient {
       return resolvedUrl.toString().replace(/\/+$/, '');
     }
 
-    if (jobRef.jobId !== undefined) {
-      return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobId}`;
-    }
-
     if (jobRef.jobIndex !== undefined) {
       return `${this.instanceUrl}/${owner}/${repo}/actions/runs/${runNumber}/jobs/${jobRef.jobIndex}`;
     }
 
-    throw new Error('Workflow job reference requires jobHtmlUrl, jobId, or jobIndex');
+    throw new Error('Workflow job reference requires jobHtmlUrl or jobIndex (use getRunJobMapping() to resolve jobId to jobIndex)');
   }
 
   async rerunWorkflow(owner: string, repo: string, runId: number): Promise<void> {
