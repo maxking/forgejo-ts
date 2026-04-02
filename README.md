@@ -144,6 +144,116 @@ const client = new ForgejoClient({
 - **`ForgejoNetworkError`** -- Network/timeout error. Has `url`, `cause`.
 - Both extend `ForgejoError` which extends `Error`.
 
+## How CI/Actions work in Forgejo (and this library)
+
+Forgejo's Actions system has two different data sources with different ID spaces, which this library abstracts over.
+
+### The tasks API (`/actions/tasks`)
+
+The only REST API endpoint that lists jobs for a repository. Returns a flat list of all jobs across all runs:
+
+```json
+{
+  "workflow_runs": [
+    { "id": 43113, "name": "smoke-test-vsix", "run_number": 471, "status": "success", ... },
+    { "id": 43112, "name": "test (20)", "run_number": 471, "status": "success", ... }
+  ]
+}
+```
+
+- Each item is a **task** with a task-level `id` (e.g. 43113)
+- Items share `run_number` when they belong to the same workflow run
+- No `html_url` field — only a `url` pointing to the run page
+- **No step/log data** — just job metadata
+
+Use `listWorkflowRuns()` to fetch this data.
+
+### The web pages (scraping)
+
+Forgejo doesn't expose job steps or logs via REST API. The library scrapes them from the web UI at:
+
+```
+/{owner}/{repo}/actions/runs/{runNumber}/jobs/{positionalIndex}/attempt/1
+```
+
+The HTML contains a `data-initial-post-response` attribute with embedded JSON:
+
+```json
+{
+  "state": {
+    "run": {
+      "jobs": [
+        { "id": 51313, "name": "test (18)", "status": "success" },
+        { "id": 51314, "name": "test (20)", "status": "success" },
+        { "id": 51315, "name": "smoke-test-vsix", "status": "success" }
+      ]
+    },
+    "currentJob": {
+      "steps": [
+        { "summary": "Set up job", "duration": "2s", "status": "success" },
+        { "summary": "actions/checkout@v4", "duration": "1s", "status": "success" }
+      ]
+    }
+  }
+}
+```
+
+Key details:
+- `state.run.jobs` lists all jobs in the run in **positional order** (index 0, 1, 2...)
+- `state.currentJob.steps` has the steps for the job at the URL's positional index
+- The job `id` values here (51313...) are **different from the task IDs** (43113...) returned by the REST API — they are different ID spaces
+
+### The ID mismatch problem
+
+| Source | smoke-test-vsix ID | Positional index |
+|--------|-------------------|-----------------|
+| Tasks API (`/actions/tasks`) | 43113 | not provided |
+| Scraped web page (`state.run.jobs`) | 51315 | 2 |
+
+Forgejo URLs use **positional indices** (`/jobs/0`, `/jobs/1`, `/jobs/2`), not database IDs. So you can't use either ID directly in a URL.
+
+### How this library resolves it
+
+When you call `getJobSteps()` or `getWorkflowLogs()` with a `WorkflowJobRef`:
+
+```typescript
+// From the tasks API, you have the task ID and name
+await client.getJobSteps('owner', 'repo', 471, {
+  jobId: 43113,        // task ID from the API (won't match scraped IDs)
+  jobName: 'smoke-test-vsix'  // name matches across both sources
+});
+```
+
+The library:
+1. Sees that `jobRef` has no `jobIndex` or `jobHtmlUrl`
+2. Scrapes `/actions/runs/471/jobs/0/attempt/1` to get the `state.run.jobs` array
+3. Tries to match `jobId` against the scraped IDs — this may fail (different ID spaces)
+4. Falls back to matching `jobName` against the scraped names — this works
+5. Resolves `"smoke-test-vsix"` → positional index `2`
+6. Fetches `/actions/runs/471/jobs/2` for the actual steps/logs
+7. Caches the mapping so subsequent calls for the same run don't re-scrape
+
+### WorkflowJobRef priority
+
+The `WorkflowJobRef` fields are resolved in this order:
+
+| Field | Source | When to use |
+|-------|--------|-------------|
+| `jobHtmlUrl` | Server-provided URL (e.g. from `/runs/{id}/jobs` API if available) | Most reliable — used as-is |
+| `jobIndex` | Known positional index | Direct — no resolution needed |
+| `jobName` | Job name from any source | Resolved via scraping (cached) |
+| `jobId` | Database ID from any source | Resolved via scraping (cached), may not match |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `listWorkflowRuns(owner, repo)` | Fetch all tasks from the REST API |
+| `getJobSteps(owner, repo, runNumber, jobRef?)` | Scrape step summaries for a job |
+| `getWorkflowLogs(owner, repo, runNumber, jobRef?)` | Scrape raw log output for a job |
+| `getRunJobMapping(owner, repo, runNumber)` | Get the id/name → positional index mapping (cached) |
+| `rerunWorkflow(owner, repo, runId)` | Re-run a workflow via REST API |
+
 ## Changelog
 
 ### 0.3.0
