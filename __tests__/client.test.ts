@@ -164,6 +164,28 @@ describe('getPullRequestFiles', () => {
     expect(result).toEqual(files);
   });
 
+  test('paginates file list for large pull requests', async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' }));
+    const page2 = [{ filename: 'file-51.ts', status: 'added' }];
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2));
+
+    const result = await client.getPullRequestFiles('owner', 'repo', 1);
+    expect(result).toEqual([...page1, ...page2]);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/pulls/1/files?page=1&limit=50'),
+      expect.any(Object)
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/pulls/1/files?page=2&limit=50'),
+      expect.any(Object)
+    );
+  });
+
   test('returns empty array', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse([]));
     const result = await client.getPullRequestFiles('owner', 'repo', 1);

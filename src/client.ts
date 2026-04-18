@@ -240,7 +240,7 @@ export class ForgejoClient {
   }
 
   async getPullRequestFiles(owner: string, repo: string, number: number): Promise<PullRequestFile[]> {
-    return this.request<PullRequestFile[]>(`/repos/${owner}/${repo}/pulls/${number}/files`);
+    return this.requestAllPages<PullRequestFile>(`/repos/${owner}/${repo}/pulls/${number}/files`);
   }
 
   async getPullRequestRefs(owner: string, repo: string, number: number): Promise<{ base: string; head: string }> {

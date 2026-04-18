@@ -2,6 +2,12 @@
 
 Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST API. Works with Forgejo, Gitea, and Codeberg instances.
 
+## NEWS
+
+### Unreleased
+
+- Fix `getPullRequestFiles()` to paginate across all changed files, so large pull requests are no longer truncated to the first page of results.
+
 ## Features
 
 - Zero external dependencies (uses Node.js built-in `fetch`)
@@ -77,7 +83,7 @@ new ForgejoClient(options: {
 | | `updatePullRequest(owner, repo, number, updates)` | Update PR title/body/state |
 | | `mergePullRequest(owner, repo, number, method?, deleteBranch?)` | Merge a PR |
 | | `closePullRequest(owner, repo, number)` | Close a PR |
-| | `getPullRequestFiles(owner, repo, number)` | List changed files |
+| | `getPullRequestFiles(owner, repo, number)` | List changed files (paginates automatically) |
 | | `getPullRequestRefs(owner, repo, number)` | Get head/base branch refs |
 | | `getPullRequestReviews(owner, repo, number)` | List reviews |
 | | `getPullRequestCommits(owner, repo, number)` | List commits |
