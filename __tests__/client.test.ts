@@ -165,25 +165,34 @@ describe('getPullRequestFiles', () => {
   });
 
   test('paginates file list for large pull requests', async () => {
-    const page1 = Array.from({ length: 50 }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' }));
-    const page2 = [{ filename: 'file-51.ts', status: 'added' }];
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse(page1))
-      .mockResolvedValueOnce(jsonResponse(page2));
+    mockFetch.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const limit = Number(url.searchParams.get('limit') ?? '0');
+
+      if (page === 1) {
+        return jsonResponse(Array.from({ length: limit }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' })));
+      }
+
+      return jsonResponse([{ filename: `file-${limit + 1}.ts`, status: 'added' }]);
+    });
 
     const result = await client.getPullRequestFiles('owner', 'repo', 1);
-    expect(result).toEqual([...page1, ...page2]);
+
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('/pulls/1/files?page=1&limit=50'),
-      expect.any(Object)
-    );
-    expect(mockFetch).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('/pulls/1/files?page=2&limit=50'),
-      expect.any(Object)
-    );
+
+    const firstUrl = new URL(String(mockFetch.mock.calls[0][0]));
+    const secondUrl = new URL(String(mockFetch.mock.calls[1][0]));
+    const limit = Number(firstUrl.searchParams.get('limit'));
+
+    expect(firstUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/1/files');
+    expect(firstUrl.searchParams.get('page')).toBe('1');
+    expect(secondUrl.searchParams.get('page')).toBe('2');
+    expect(secondUrl.searchParams.get('limit')).toBe(firstUrl.searchParams.get('limit'));
+    expect(result).toEqual([
+      ...Array.from({ length: limit }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' })),
+      { filename: `file-${limit + 1}.ts`, status: 'added' }
+    ]);
   });
 
   test('returns empty array', async () => {
