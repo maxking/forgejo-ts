@@ -2,11 +2,11 @@
 
 Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST API. Works with Forgejo, Gitea, and Codeberg instances.
 
-## NEWS
+## News
 
-### Unreleased
+### 0.3.1
 
-- Fix `getPullRequestFiles()` to paginate across all changed files, so large pull requests are no longer truncated to the first page of results.
+* Fix `getPullRequestFiles()` pagination so large pull requests return all changed files.
 
 ## Features
 
