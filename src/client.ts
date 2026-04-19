@@ -249,17 +249,17 @@ export class ForgejoClient {
   }
 
   async getPullRequestReviews(owner: string, repo: string, number: number): Promise<PullRequestReview[]> {
-    return this.request<PullRequestReview[]>(`/repos/${owner}/${repo}/pulls/${number}/reviews`);
+    return this.requestAllPages<PullRequestReview>(`/repos/${owner}/${repo}/pulls/${number}/reviews`);
   }
 
   async getPullRequestCommits(owner: string, repo: string, number: number): Promise<PullRequestCommit[]> {
-    return this.request<PullRequestCommit[]>(`/repos/${owner}/${repo}/pulls/${number}/commits`);
+    return this.requestAllPages<PullRequestCommit>(`/repos/${owner}/${repo}/pulls/${number}/commits`);
   }
 
   // ======================== Reviews ========================
 
   async getReviewComments(owner: string, repo: string, prNumber: number, reviewId: number): Promise<ReviewComment[]> {
-    return this.request<ReviewComment[]>(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments`);
+    return this.requestAllPages<ReviewComment>(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments`);
   }
 
   async createReview(
@@ -309,7 +309,7 @@ export class ForgejoClient {
   }
 
   async getIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]> {
-    return this.request<IssueComment[]>(`/repos/${owner}/${repo}/issues/${number}/comments`);
+    return this.requestAllPages<IssueComment>(`/repos/${owner}/${repo}/issues/${number}/comments`);
   }
 
   async createComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment> {
@@ -317,7 +317,7 @@ export class ForgejoClient {
   }
 
   async getIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]> {
-    return this.request<TimelineEvent[]>(`/repos/${owner}/${repo}/issues/${number}/timeline`);
+    return this.requestAllPages<TimelineEvent>(`/repos/${owner}/${repo}/issues/${number}/timeline`);
   }
 
   // ======================== Files ========================
