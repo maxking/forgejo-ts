@@ -6,7 +6,7 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ### Unreleased
 
-* Paginate remaining list endpoints, including commit statuses, so large result sets return complete results.
+* Paginate pull request reviews/commits, review comments, issue comments/timeline, and commit statuses so large result sets return complete results.
 
 ### 0.3.1
 
