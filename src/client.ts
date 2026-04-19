@@ -85,6 +85,9 @@ export class ForgejoClient {
       const sep = endpoint.includes('?') ? '&' : '?';
       const items = await this.request<T[]>(`${endpoint}${sep}page=${page}&limit=${limit}`);
       allItems.push(...items);
+      // Forgejo list endpoints do not consistently expose a total count, so we stop
+      // once a page is shorter than the requested limit. If the final page happens
+      // to be exactly `limit` items, this may perform one extra empty-page request.
       if (items.length < limit) break;
       page++;
     }
@@ -516,7 +519,7 @@ export class ForgejoClient {
   }
 
   async getCommitStatuses(owner: string, repo: string, sha: string): Promise<CommitStatus[]> {
-    return this.request<CommitStatus[]>(`/repos/${owner}/${repo}/statuses/${sha}`);
+    return this.requestAllPages<CommitStatus>(`/repos/${owner}/${repo}/statuses/${sha}`);
   }
 
   // ======================== Tags ========================

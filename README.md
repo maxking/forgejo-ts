@@ -4,6 +4,10 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
+### Unreleased
+
+* Paginate remaining list endpoints, including commit statuses, so large result sets return complete results.
+
 ### 0.3.1
 
 * Fix `getPullRequestFiles()` pagination so large pull requests return all changed files.
@@ -109,7 +113,7 @@ new ForgejoClient(options: {
 | | `getJobSteps(owner, repo, runNumber, jobRef?)` | Parse step summaries |
 | | `getRunJobMapping(owner, repo, runNumber)` | Map job database IDs to positional indices |
 | | `rerunWorkflow(owner, repo, runId)` | Re-run a workflow |
-| | `getCommitStatuses(owner, repo, sha)` | Get commit statuses |
+| | `getCommitStatuses(owner, repo, sha)` | Get commit statuses (paginates automatically) |
 | **Tags** | | |
 | | `listTags(owner, repo)` | List tags |
 | | `createTag(owner, repo, options)` | Create a tag |

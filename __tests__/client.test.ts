@@ -64,6 +64,7 @@ function mockTwoPageArrayResponse<T>(itemFactory: (index: number) => T) {
   });
 }
 
+/** Assert the helper fetched two pages from the expected endpoint and return the negotiated page size. */
 function expectTwoPageArrayRequests(expectedPathname: string): number {
   expect(mockFetch).toHaveBeenCalledTimes(2);
 
@@ -689,6 +690,19 @@ describe('getCommitStatuses', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(statuses));
     const result = await client.getCommitStatuses('owner', 'repo', 'abc123');
     expect(result).toEqual(statuses);
+  });
+
+  test('paginates commit statuses', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, status: 'success', context: `ci/test-${index}` }));
+
+    const result = await client.getCommitStatuses('owner', 'repo', 'abc123');
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/statuses/abc123');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      status: 'success',
+      context: `ci/test-${i + 1}`
+    })));
   });
 });
 
