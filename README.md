@@ -4,6 +4,10 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
+### Unreleased
+
+* Paginate pull request reviews/commits, review comments, issue comments/timeline, and commit statuses so large result sets return complete results.
+
 ### 0.3.1
 
 * Fix `getPullRequestFiles()` pagination so large pull requests return all changed files.
@@ -85,10 +89,10 @@ new ForgejoClient(options: {
 | | `closePullRequest(owner, repo, number)` | Close a PR |
 | | `getPullRequestFiles(owner, repo, number)` | List changed files (paginates automatically) |
 | | `getPullRequestRefs(owner, repo, number)` | Get head/base branch refs |
-| | `getPullRequestReviews(owner, repo, number)` | List reviews |
-| | `getPullRequestCommits(owner, repo, number)` | List commits |
+| | `getPullRequestReviews(owner, repo, number)` | List reviews (paginates automatically) |
+| | `getPullRequestCommits(owner, repo, number)` | List commits (paginates automatically) |
 | **Reviews** | | |
-| | `getReviewComments(owner, repo, prNumber, reviewId)` | Get review comments |
+| | `getReviewComments(owner, repo, prNumber, reviewId)` | Get review comments (paginates automatically) |
 | | `createReview(owner, repo, number, state, body)` | Create a review |
 | | `createReviewWithComments(owner, repo, prNumber, options)` | Create review with inline comments |
 | **Issues** | | |
@@ -96,9 +100,9 @@ new ForgejoClient(options: {
 | | `getIssue(owner, repo, number)` | Get issue details |
 | | `createIssue(owner, repo, title, body?)` | Create an issue |
 | | `updateIssue(owner, repo, number, updates)` | Update issue title/body/state |
-| | `getIssueComments(owner, repo, number)` | List comments |
+| | `getIssueComments(owner, repo, number)` | List comments (paginates automatically) |
 | | `createComment(owner, repo, number, body)` | Add a comment |
-| | `getIssueTimeline(owner, repo, number)` | Get timeline events |
+| | `getIssueTimeline(owner, repo, number)` | Get timeline events (paginates automatically) |
 | **Files** | | |
 | | `getFileContents(owner, repo, filepath, ref)` | Get decoded file contents |
 | **CI / Actions** | | |
@@ -109,7 +113,7 @@ new ForgejoClient(options: {
 | | `getJobSteps(owner, repo, runNumber, jobRef?)` | Parse step summaries |
 | | `getRunJobMapping(owner, repo, runNumber)` | Map job database IDs to positional indices |
 | | `rerunWorkflow(owner, repo, runId)` | Re-run a workflow |
-| | `getCommitStatuses(owner, repo, sha)` | Get commit statuses |
+| | `getCommitStatuses(owner, repo, sha)` | Get commit statuses (paginates automatically) |
 | **Tags** | | |
 | | `listTags(owner, repo)` | List tags |
 | | `createTag(owner, repo, options)` | Create a tag |

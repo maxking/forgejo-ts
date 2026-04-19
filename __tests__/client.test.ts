@@ -50,6 +50,37 @@ function emptyResponse(status = 204) {
   } as unknown as Response;
 }
 
+function mockTwoPageArrayResponse<T>(itemFactory: (index: number) => T) {
+  mockFetch.mockImplementation(async (input) => {
+    const url = new URL(String(input));
+    const page = Number(url.searchParams.get('page') ?? '1');
+    const limit = Number(url.searchParams.get('limit') ?? '0');
+
+    if (page === 1) {
+      return jsonResponse(Array.from({ length: limit }, (_, i) => itemFactory(i + 1)));
+    }
+
+    return jsonResponse([itemFactory(limit + 1)]);
+  });
+}
+
+/** Assert the helper fetched two pages from the expected endpoint and return the negotiated page size. */
+function expectTwoPageArrayRequests(expectedPathname: string): number {
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+
+  const firstUrl = new URL(String(mockFetch.mock.calls[0][0]));
+  const secondUrl = new URL(String(mockFetch.mock.calls[1][0]));
+  const limit = Number(firstUrl.searchParams.get('limit'));
+
+  expect(firstUrl.pathname).toBe(expectedPathname);
+  expect(firstUrl.searchParams.get('page')).toBe('1');
+  expect(secondUrl.pathname).toBe(expectedPathname);
+  expect(secondUrl.searchParams.get('page')).toBe('2');
+  expect(secondUrl.searchParams.get('limit')).toBe(firstUrl.searchParams.get('limit'));
+
+  return limit;
+}
+
 // ==================== Connection ====================
 
 describe('testConnection', () => {
@@ -165,34 +196,15 @@ describe('getPullRequestFiles', () => {
   });
 
   test('paginates file list for large pull requests', async () => {
-    mockFetch.mockImplementation(async (input) => {
-      const url = new URL(String(input));
-      const page = Number(url.searchParams.get('page') ?? '1');
-      const limit = Number(url.searchParams.get('limit') ?? '0');
-
-      if (page === 1) {
-        return jsonResponse(Array.from({ length: limit }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' })));
-      }
-
-      return jsonResponse([{ filename: `file-${limit + 1}.ts`, status: 'added' }]);
-    });
+    mockTwoPageArrayResponse(index => ({ filename: `file-${index}.ts`, status: 'modified' }));
 
     const result = await client.getPullRequestFiles('owner', 'repo', 1);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/pulls/1/files');
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-
-    const firstUrl = new URL(String(mockFetch.mock.calls[0][0]));
-    const secondUrl = new URL(String(mockFetch.mock.calls[1][0]));
-    const limit = Number(firstUrl.searchParams.get('limit'));
-
-    expect(firstUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/1/files');
-    expect(firstUrl.searchParams.get('page')).toBe('1');
-    expect(secondUrl.searchParams.get('page')).toBe('2');
-    expect(secondUrl.searchParams.get('limit')).toBe(firstUrl.searchParams.get('limit'));
-    expect(result).toEqual([
-      ...Array.from({ length: limit }, (_, i) => ({ filename: `file-${i + 1}.ts`, status: 'modified' })),
-      { filename: `file-${limit + 1}.ts`, status: 'added' }
-    ]);
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      filename: `file-${i + 1}.ts`,
+      status: 'modified'
+    })));
   });
 
   test('returns empty array', async () => {
@@ -220,6 +232,18 @@ describe('getPullRequestReviews', () => {
     const result = await client.getPullRequestReviews('owner', 'repo', 1);
     expect(result).toEqual(reviews);
   });
+
+  test('paginates reviews for large pull requests', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, state: 'APPROVED' }));
+
+    const result = await client.getPullRequestReviews('owner', 'repo', 1);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/pulls/1/reviews');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      state: 'APPROVED'
+    })));
+  });
 });
 
 describe('getPullRequestCommits', () => {
@@ -228,6 +252,17 @@ describe('getPullRequestCommits', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(commits));
     const result = await client.getPullRequestCommits('owner', 'repo', 1);
     expect(result).toEqual(commits);
+  });
+
+  test('paginates commit list for large pull requests', async () => {
+    mockTwoPageArrayResponse(index => ({ sha: `commit-${index}` }));
+
+    const result = await client.getPullRequestCommits('owner', 'repo', 1);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/pulls/1/commits');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      sha: `commit-${i + 1}`
+    })));
   });
 });
 
@@ -239,6 +274,18 @@ describe('getReviewComments', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(comments));
     const result = await client.getReviewComments('owner', 'repo', 1, 10);
     expect(result).toEqual(comments);
+  });
+
+  test('paginates review comments', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, body: `comment-${index}` }));
+
+    const result = await client.getReviewComments('owner', 'repo', 1, 10);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/pulls/1/reviews/10/comments');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      body: `comment-${i + 1}`
+    })));
   });
 });
 
@@ -312,6 +359,18 @@ describe('getIssueComments', () => {
     const result = await client.getIssueComments('owner', 'repo', 5);
     expect(result).toEqual(comments);
   });
+
+  test('paginates issue comments', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, body: `comment-${index}` }));
+
+    const result = await client.getIssueComments('owner', 'repo', 5);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/issues/5/comments');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      body: `comment-${i + 1}`
+    })));
+  });
 });
 
 describe('createComment', () => {
@@ -329,6 +388,18 @@ describe('getIssueTimeline', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(events));
     const result = await client.getIssueTimeline('owner', 'repo', 5);
     expect(result).toEqual(events);
+  });
+
+  test('paginates timeline events', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, event: `event-${index}` }));
+
+    const result = await client.getIssueTimeline('owner', 'repo', 5);
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/issues/5/timeline');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      event: `event-${i + 1}`
+    })));
   });
 });
 
@@ -619,6 +690,19 @@ describe('getCommitStatuses', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(statuses));
     const result = await client.getCommitStatuses('owner', 'repo', 'abc123');
     expect(result).toEqual(statuses);
+  });
+
+  test('paginates commit statuses', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, status: 'success', context: `ci/test-${index}` }));
+
+    const result = await client.getCommitStatuses('owner', 'repo', 'abc123');
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/statuses/abc123');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      status: 'success',
+      context: `ci/test-${i + 1}`
+    })));
   });
 });
 
