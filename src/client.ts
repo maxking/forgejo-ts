@@ -566,6 +566,13 @@ export class ForgejoClient {
     return this.requestWithBody<RepositoryInfo>('POST', `/orgs/${encodeURIComponent(org)}/repos`, options);
   }
 
+  async searchRepositories(query?: string, limit = 50): Promise<RepositoryInfo[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query) params.set('q', query);
+    const result = await this.request<{ data: RepositoryInfo[] }>(`/repos/search?${params}`);
+    return result.data;
+  }
+
   // ======================== Raw API ========================
 
   /**
