@@ -1,4 +1,4 @@
-export { User, UserRef, Label } from './common.js';
+export { User, UserRef, Label, CreateRepositoryOptions, RepositoryInfo } from './common.js';
 export {
   PullRequest,
   PullRequestListItem,
