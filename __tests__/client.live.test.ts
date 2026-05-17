@@ -14,6 +14,7 @@
  *   - Release v1.0.0
  */
 
+import { request as playwrightRequest, APIRequestContext } from '@playwright/test';
 import { ForgejoClient, ForgejoApiError } from '../src/index';
 
 const FORGEJO_URL = process.env.FORGEJO_TEST_URL || '';
@@ -25,10 +26,61 @@ const describeIfLive = FORGEJO_URL && FORGEJO_TOKEN ? describe : describe.skip;
 
 describeIfLive('ForgejoClient - live integration tests', () => {
   let client: ForgejoClient;
+  let api: APIRequestContext;
+  const reposToDelete: string[] = [];
+  const orgsToDelete: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     client = new ForgejoClient({ instanceUrl: FORGEJO_URL, token: FORGEJO_TOKEN });
+    api = await playwrightRequest.newContext({
+      baseURL: FORGEJO_URL,
+      extraHTTPHeaders: {
+        Authorization: `token ${FORGEJO_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
   });
+
+  afterAll(async () => {
+    for (const fullName of reposToDelete.reverse()) {
+      await api.delete(`/api/v1/repos/${fullName}`).catch(() => undefined);
+    }
+    for (const org of orgsToDelete.reverse()) {
+      await api.delete(`/api/v1/orgs/${org}`).catch(() => undefined);
+    }
+    await api?.dispose();
+  });
+
+  const uniqueName = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  async function expectApiRepository(fullName: string, expectedName: string) {
+    const response = await api.get(`/api/v1/repos/${fullName}`);
+    expect(response.ok()).toBe(true);
+    const repository = await response.json();
+    expect(repository.name).toBe(expectedName);
+    expect(repository.full_name).toBe(fullName);
+    return repository;
+  }
+
+  async function createRepoViaApi(name: string) {
+    const response = await api.post('/api/v1/user/repos', {
+      data: { name, auto_init: true, default_branch: 'main' },
+    });
+    expect(response.ok()).toBe(true);
+    reposToDelete.push(`${OWNER}/${name}`);
+  }
+
+  async function waitForSearchResult(query: string, expectedNames: string[]) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const repositories = await client.searchRepositories(query, 1);
+      const names = repositories.map(repo => repo.name);
+      if (expectedNames.every(name => names.includes(name))) {
+        return repositories;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    return client.searchRepositories(query, 1);
+  }
 
   // ======================== Connection ========================
 
@@ -304,6 +356,75 @@ describeIfLive('ForgejoClient - live integration tests', () => {
 
       // Clean up the tag
       await client.deleteTag(OWNER, REPO, 'v99.1.0-test');
+    });
+  });
+
+  // ======================== User & Repository ========================
+
+  describe('createRepository', () => {
+    it('should create a repository and verify it via the API', async () => {
+      const name = uniqueName('client-create-repo');
+
+      const repository = await client.createRepository({
+        name,
+        description: 'Created by live integration test',
+        auto_init: true,
+        default_branch: 'main',
+      });
+      reposToDelete.push(`${OWNER}/${name}`);
+
+      expect(repository.name).toBe(name);
+      expect(repository.full_name).toBe(`${OWNER}/${name}`);
+
+      const apiRepository = await expectApiRepository(`${OWNER}/${name}`, name);
+      expect(apiRepository.description).toBe('Created by live integration test');
+      expect(apiRepository.default_branch).toBe('main');
+    });
+  });
+
+  describe('createOrgRepository', () => {
+    it('should create an organization repository and verify it via the API', async () => {
+      const org = uniqueName('client-org');
+      const repo = uniqueName('client-org-repo');
+
+      const orgResponse = await api.post('/api/v1/orgs', {
+        data: { username: org, full_name: org, visibility: 'public' },
+      });
+      expect(orgResponse.ok()).toBe(true);
+      orgsToDelete.push(org);
+
+      const repository = await client.createOrgRepository(org, {
+        name: repo,
+        description: 'Created by live org repository test',
+        auto_init: true,
+        default_branch: 'main',
+      });
+      reposToDelete.push(`${org}/${repo}`);
+
+      expect(repository.name).toBe(repo);
+      expect(repository.full_name).toBe(`${org}/${repo}`);
+
+      const apiRepository = await expectApiRepository(`${org}/${repo}`, repo);
+      expect(apiRepository.description).toBe('Created by live org repository test');
+      expect(apiRepository.owner.login).toBe(org);
+    });
+  });
+
+  describe('searchRepositories', () => {
+    it('should return repositories across multiple API result pages', async () => {
+      const prefix = uniqueName('client-search-repo');
+      const first = `${prefix}-a`;
+      const second = `${prefix}-b`;
+
+      await createRepoViaApi(first);
+      await createRepoViaApi(second);
+
+      const repositories = await waitForSearchResult(prefix, [first, second]);
+      const names = repositories.map(repo => repo.name);
+
+      expect(names).toContain(first);
+      expect(names).toContain(second);
+      expect(repositories.filter(repo => repo.name.startsWith(prefix)).length).toBeGreaterThanOrEqual(2);
     });
   });
 

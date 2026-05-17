@@ -8,7 +8,7 @@ import {
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
-  User, CreateRepositoryOptions, RepositoryInfo,
+  CreateRepositoryOptions, RepositoryInfo,
 } from './types/index.js';
 
 export interface ForgejoClientOptions {
@@ -570,10 +570,21 @@ export class ForgejoClient {
   }
 
   async searchRepositories(query?: string, limit = 50): Promise<RepositoryInfo[]> {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (query) params.set('q', query);
-    const result = await this.request<{ data: RepositoryInfo[] }>(`/repos/search?${params}`);
-    return result.data;
+    const allRepositories: RepositoryInfo[] = [];
+    let page = 1;
+
+    for (;;) {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (query) params.set('q', query);
+
+      const result = await this.request<{ data: RepositoryInfo[] }>(`/repos/search?${params}`);
+      allRepositories.push(...result.data);
+
+      if (result.data.length < limit) break;
+      page++;
+    }
+
+    return allRepositories;
   }
 
   // ======================== Raw API ========================
