@@ -8,6 +8,7 @@ import {
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
+  User, CreateRepositoryOptions, RepositoryInfo,
 } from './types/index.js';
 
 export interface ForgejoClientOptions {
@@ -553,6 +554,23 @@ export class ForgejoClient {
 
   async deleteRelease(owner: string, repo: string, id: number): Promise<void> {
     await this.requestWithBody<void>('DELETE', `/repos/${owner}/${repo}/releases/${id}`);
+  }
+
+  // ======================== User & Repository ========================
+
+  async createRepository(options: CreateRepositoryOptions): Promise<RepositoryInfo> {
+    return this.requestWithBody<RepositoryInfo>('POST', '/user/repos', options);
+  }
+
+  async createOrgRepository(org: string, options: CreateRepositoryOptions): Promise<RepositoryInfo> {
+    return this.requestWithBody<RepositoryInfo>('POST', `/orgs/${encodeURIComponent(org)}/repos`, options);
+  }
+
+  async searchRepositories(query?: string, limit = 50): Promise<RepositoryInfo[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query) params.set('q', query);
+    const result = await this.request<{ data: RepositoryInfo[] }>(`/repos/search?${params}`);
+    return result.data;
   }
 
   // ======================== Raw API ========================
