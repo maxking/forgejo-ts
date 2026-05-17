@@ -784,6 +784,65 @@ describe('deleteRelease', () => {
   });
 });
 
+// ==================== User & Repository ====================
+
+describe('createRepository', () => {
+  test('creates a user repository', async () => {
+    const repo = { id: 1, name: 'new-repo', full_name: 'owner/new-repo' };
+    mockFetch.mockResolvedValueOnce(jsonResponse(repo, 201));
+
+    const result = await client.createRepository({ name: 'new-repo', private: true });
+
+    expect(result).toEqual(repo);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/user/repos',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'new-repo', private: true })
+      })
+    );
+  });
+});
+
+describe('createOrgRepository', () => {
+  test('creates an organization repository and encodes org names', async () => {
+    const repo = { id: 2, name: 'new-repo', full_name: 'my org/new-repo' };
+    mockFetch.mockResolvedValueOnce(jsonResponse(repo, 201));
+
+    const result = await client.createOrgRepository('my org', { name: 'new-repo' });
+
+    expect(result).toEqual(repo);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/orgs/my%20org/repos',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+});
+
+describe('searchRepositories', () => {
+  test('fetches all search result pages', async () => {
+    const page1 = Array.from({ length: 3 }, (_, i) => ({ id: i + 1, name: `repo-${i + 1}` }));
+    const page2 = [{ id: 4, name: 'repo-4' }];
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: page1 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: page2 }));
+
+    const result = await client.searchRepositories('forgejo ts', 3);
+
+    expect(result).toEqual([...page1, ...page2]);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const firstUrl = new URL(String(mockFetch.mock.calls[0][0]));
+    const secondUrl = new URL(String(mockFetch.mock.calls[1][0]));
+    expect(firstUrl.pathname).toBe('/api/v1/repos/search');
+    expect(firstUrl.searchParams.get('q')).toBe('forgejo ts');
+    expect(firstUrl.searchParams.get('page')).toBe('1');
+    expect(firstUrl.searchParams.get('limit')).toBe('3');
+    expect(secondUrl.searchParams.get('page')).toBe('2');
+    expect(secondUrl.searchParams.get('limit')).toBe('3');
+  });
+});
+
 // ==================== Raw API ====================
 
 describe('rawRequest', () => {
