@@ -6,7 +6,10 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ### Unreleased
 
-* Paginate pull request reviews/commits, review comments, issue comments/timeline, and commit statuses so large result sets return complete results.
+### 0.3.2
+
+* Add repository APIs for creating user repositories, creating organization repositories, and searching repositories.
+* Paginate repository search and pull request reviews/commits, review comments, issue comments/timeline, and commit statuses so large result sets return complete results.
 
 ### 0.3.1
 
@@ -19,7 +22,7 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 - Full TypeScript types for all API responses
 - Injectable logger interface
 - Typed error classes (`ForgejoApiError`, `ForgejoNetworkError`)
-- Covers pull requests, issues, CI/actions, tags, releases, file contents, reviews, and more
+- Covers pull requests, issues, repositories, CI/actions, tags, releases, file contents, reviews, and more
 - Raw API escape hatch for any endpoint not covered by typed methods
 
 ## Installation
@@ -51,6 +54,17 @@ const issue = await client.getIssue('owner', 'repo', 42);
 
 // Create a pull request
 const pr = await client.createPullRequest('owner', 'repo', 'My PR', 'feature-branch', 'main', 'Description');
+
+// Search repositories (paginates automatically)
+const repos = await client.searchRepositories('forgejo-ts');
+
+// Create a repository for the authenticated user
+const repo = await client.createRepository({
+  name: 'new-project',
+  description: 'Created with forgejo-ts',
+  private: true,
+  auto_init: true,
+});
 
 // Error handling
 try {
@@ -103,6 +117,10 @@ new ForgejoClient(options: {
 | | `getIssueComments(owner, repo, number)` | List comments (paginates automatically) |
 | | `createComment(owner, repo, number, body)` | Add a comment |
 | | `getIssueTimeline(owner, repo, number)` | Get timeline events (paginates automatically) |
+| **Repositories** | | |
+| | `createRepository(options)` | Create a repository for the authenticated user |
+| | `createOrgRepository(org, options)` | Create a repository in an organization |
+| | `searchRepositories(query?, limit?)` | Search repositories (paginates automatically) |
 | **Files** | | |
 | | `getFileContents(owner, repo, filepath, ref)` | Get decoded file contents |
 | **CI / Actions** | | |
