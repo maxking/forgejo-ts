@@ -367,13 +367,15 @@ describe('listIssues', () => {
     expect(url.searchParams.get('q')).toBe('crash login');
   });
 
-  test('omits blank issue query', async () => {
+  test('uses legacy issue list endpoint when query is blank', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse([]));
 
     await client.listIssues('owner', 'repo', { state: 'closed', query: '   ' });
 
     const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
     expect(url.searchParams.get('state')).toBe('closed');
+    expect(url.searchParams.get('type')).toBeNull();
     expect(url.searchParams.get('q')).toBeNull();
   });
 });

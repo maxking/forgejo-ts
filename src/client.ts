@@ -317,11 +317,16 @@ export class ForgejoClient {
     stateOrOptions: 'open' | 'closed' | 'all' | IssueListOptions = 'all'
   ): Promise<IssueListItem[]> {
     const options = typeof stateOrOptions === 'string' ? { state: stateOrOptions } : stateOrOptions;
-    const params = new URLSearchParams({ state: options.state ?? 'all', type: 'issues' });
+    const state = options.state ?? 'all';
     const query = options.query?.trim();
-    if (query) params.set('q', query);
 
-    const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?${params}`);
+    if (query) {
+      const params = new URLSearchParams({ state, type: 'issues', q: query });
+      const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?${params}`);
+      return items.filter(item => !item.pull_request);
+    }
+
+    const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?state=${state}`);
     return items.filter(item => !item.pull_request);
   }
 
