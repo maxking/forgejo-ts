@@ -1,5 +1,14 @@
 import { User, UserRef, Label } from './common.js';
 
+export type IssueState = 'open' | 'closed' | 'all';
+
+export interface IssueListOptions {
+  /** Filter by issue state. Defaults to 'all'. */
+  state?: IssueState;
+  /** Free-text server-side search query, matched by Forgejo against issue title/body. */
+  query?: string;
+}
+
 export interface Issue {
   id: number;
   number: number;

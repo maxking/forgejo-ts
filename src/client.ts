@@ -1,9 +1,9 @@
 import { ForgejoApiError, ForgejoNetworkError } from './errors.js';
 import { ForgejoLogger, noopLogger } from './logger.js';
 import {
-  PullRequest, PullRequestListItem, PullRequestFile,
+  PullRequest, PullRequestListItem, PullRequestListOptions, PullRequestFile,
   FileContentsResponse, CommitStatus, PullRequestReview, PullRequestCommit,
-  Issue, IssueListItem, IssueComment, TimelineEvent,
+  Issue, IssueListItem, IssueListOptions, IssueComment, TimelineEvent,
   ActionTasksResponse, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef,
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
@@ -179,7 +179,28 @@ export class ForgejoClient {
 
   // ======================== Pull Requests ========================
 
-  async listPullRequests(owner: string, repo: string, state: 'open' | 'closed' | 'all' = 'all'): Promise<PullRequestListItem[]> {
+  async listPullRequests(
+    owner: string,
+    repo: string,
+    stateOrOptions: 'open' | 'closed' | 'all' | PullRequestListOptions = 'all'
+  ): Promise<PullRequestListItem[]> {
+    const options = typeof stateOrOptions === 'string' ? { state: stateOrOptions } : stateOrOptions;
+    const state = options.state ?? 'all';
+    const query = options.query?.trim();
+
+    if (query) {
+      // The pulls list endpoint does not expose free-text search. Forgejo's issues
+      // endpoint can search pull requests via type=pulls, then we hydrate each
+      // match through the pull request endpoint to preserve PR-specific fields
+      // like draft and merged.
+      const params = new URLSearchParams({ state, type: 'pulls', q: query });
+      const matches = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?${params}`);
+      const pullRequestNumbers = matches
+        .filter(item => item.pull_request)
+        .map(item => item.number);
+      return Promise.all(pullRequestNumbers.map(number => this.getPullRequest(owner, repo, number)));
+    }
+
     return this.requestAllPages<PullRequestListItem>(`/repos/${owner}/${repo}/pulls?state=${state}`);
   }
 
@@ -290,8 +311,17 @@ export class ForgejoClient {
 
   // ======================== Issues ========================
 
-  async listIssues(owner: string, repo: string, state: 'open' | 'closed' | 'all' = 'all'): Promise<IssueListItem[]> {
-    const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?state=${state}`);
+  async listIssues(
+    owner: string,
+    repo: string,
+    stateOrOptions: 'open' | 'closed' | 'all' | IssueListOptions = 'all'
+  ): Promise<IssueListItem[]> {
+    const options = typeof stateOrOptions === 'string' ? { state: stateOrOptions } : stateOrOptions;
+    const params = new URLSearchParams({ state: options.state ?? 'all', type: 'issues' });
+    const query = options.query?.trim();
+    if (query) params.set('q', query);
+
+    const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?${params}`);
     return items.filter(item => !item.pull_request);
   }
 

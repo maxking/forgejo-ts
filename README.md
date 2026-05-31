@@ -6,6 +6,8 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ### Unreleased
 
+* Add typed issue and pull request list options, including server-side free-text search for issues and pull requests.
+
 ### 0.3.2
 
 * Add repository APIs for creating user repositories, creating organization repositories, and searching repositories.
@@ -49,8 +51,14 @@ const client = new ForgejoClient({
 // List open pull requests
 const prs = await client.listPullRequests('owner', 'repo', 'open');
 
+// Search open pull requests by title/body
+const matchingPrs = await client.listPullRequests('owner', 'repo', { state: 'open', query: 'bugfix' });
+
 // Get issue details
 const issue = await client.getIssue('owner', 'repo', 42);
+
+// Search open issues by title/body
+const matchingIssues = await client.listIssues('owner', 'repo', { state: 'open', query: 'crash' });
 
 // Create a pull request
 const pr = await client.createPullRequest('owner', 'repo', 'My PR', 'feature-branch', 'main', 'Description');
@@ -95,7 +103,7 @@ new ForgejoClient(options: {
 |----------|--------|-------------|
 | Connection | `testConnection()` | Test connectivity, returns `boolean` |
 | **Pull Requests** | | |
-| | `listPullRequests(owner, repo, state?)` | List PRs (paginates automatically) |
+| | `listPullRequests(owner, repo, stateOrOptions?)` | List PRs (paginates automatically); accepts state string or `{ state, query }` |
 | | `getPullRequest(owner, repo, number)` | Get PR details |
 | | `createPullRequest(owner, repo, title, head, base, body?)` | Create a PR |
 | | `updatePullRequest(owner, repo, number, updates)` | Update PR title/body/state |
@@ -110,7 +118,7 @@ new ForgejoClient(options: {
 | | `createReview(owner, repo, number, state, body)` | Create a review |
 | | `createReviewWithComments(owner, repo, prNumber, options)` | Create review with inline comments |
 | **Issues** | | |
-| | `listIssues(owner, repo, state?)` | List issues (PRs filtered out) |
+| | `listIssues(owner, repo, stateOrOptions?)` | List issues (PRs filtered out, paginates automatically); accepts state string or `{ state, query }` |
 | | `getIssue(owner, repo, number)` | Get issue details |
 | | `createIssue(owner, repo, title, body?)` | Create an issue |
 | | `updateIssue(owner, repo, number, updates)` | Update issue title/body/state |

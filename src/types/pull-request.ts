@@ -1,4 +1,12 @@
 import { User, UserRef, Label } from './common.js';
+import type { IssueState } from './issue.js';
+
+export interface PullRequestListOptions {
+  /** Filter by pull request state. Defaults to 'all'. */
+  state?: IssueState;
+  /** Free-text server-side search query, matched by Forgejo against pull request title/body. */
+  query?: string;
+}
 
 export interface PullRequest {
   id: number;

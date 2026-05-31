@@ -1,5 +1,6 @@
 export { User, UserRef, Label, CreateRepositoryOptions, RepositoryInfo } from './common.js';
 export {
+  PullRequestListOptions,
   PullRequest,
   PullRequestListItem,
   PullRequestFile,
@@ -9,6 +10,8 @@ export {
   PullRequestCommit
 } from './pull-request.js';
 export {
+  IssueState,
+  IssueListOptions,
   Issue,
   IssueListItem,
   IssueComment,

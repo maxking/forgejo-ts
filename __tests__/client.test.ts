@@ -118,6 +118,36 @@ describe('listPullRequests', () => {
       expect.any(Object)
     );
   });
+
+  test('accepts options with state', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await client.listPullRequests('owner', 'repo', { state: 'closed' });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('closed');
+  });
+
+  test('searches pull requests via issues endpoint and hydrates PR details', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse([
+        { number: 7, title: 'Search hit', pull_request: { url: 'https://git.example.com/api/v1/repos/owner/repo/pulls/7' } }
+      ]))
+      .mockResolvedValueOnce(jsonResponse({ number: 7, title: 'Search hit', merged: false, draft: false }));
+
+    const result = await client.listPullRequests('owner', 'repo', { state: 'open', query: 'search term' });
+
+    expect(result).toEqual([{ number: 7, title: 'Search hit', merged: false, draft: false }]);
+
+    const searchUrl = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(searchUrl.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(searchUrl.searchParams.get('state')).toBe('open');
+    expect(searchUrl.searchParams.get('type')).toBe('pulls');
+    expect(searchUrl.searchParams.get('q')).toBe('search term');
+
+    const detailUrl = new URL(String(mockFetch.mock.calls[1][0]));
+    expect(detailUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/7');
+  });
 });
 
 describe('getPullRequest', () => {
@@ -322,6 +352,29 @@ describe('listIssues', () => {
     const result = await client.listIssues('owner', 'repo');
     expect(result).toHaveLength(1);
     expect(result[0].number).toBe(1);
+  });
+
+  test('accepts options with state and query', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1, title: 'Crash on login' }]));
+
+    const result = await client.listIssues('owner', 'repo', { state: 'open', query: 'crash login' });
+
+    expect(result).toEqual([{ number: 1, title: 'Crash on login' }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('type')).toBe('issues');
+    expect(url.searchParams.get('q')).toBe('crash login');
+  });
+
+  test('omits blank issue query', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listIssues('owner', 'repo', { state: 'closed', query: '   ' });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.searchParams.get('state')).toBe('closed');
+    expect(url.searchParams.get('q')).toBeNull();
   });
 });
 
