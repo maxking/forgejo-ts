@@ -4,7 +4,7 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
-### Unreleased
+### 0.3.3
 
 * Add typed issue and pull request list options, including server-side free-text search for issues and pull requests. Pull request search hydrates matching PR details in bounded batches.
 
