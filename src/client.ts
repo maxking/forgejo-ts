@@ -96,6 +96,17 @@ export class ForgejoClient {
     return allItems;
   }
 
+  private async mapInBatches<T, R>(items: T[], batchSize: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+    const results: R[] = [];
+
+    for (let start = 0; start < items.length; start += batchSize) {
+      const batch = items.slice(start, start + batchSize);
+      results.push(...await Promise.all(batch.map(mapper)));
+    }
+
+    return results;
+  }
+
   private async requestWithBody<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
     const url = `${this.instanceUrl}/api/v1${endpoint}`;
     this.logger.debug(`${method} ${url}`);
@@ -198,7 +209,7 @@ export class ForgejoClient {
       const pullRequestNumbers = matches
         .filter(item => item.pull_request)
         .map(item => item.number);
-      return Promise.all(pullRequestNumbers.map(number => this.getPullRequest(owner, repo, number)));
+      return this.mapInBatches(pullRequestNumbers, 5, number => this.getPullRequest(owner, repo, number));
     }
 
     return this.requestAllPages<PullRequestListItem>(`/repos/${owner}/${repo}/pulls?state=${state}`);

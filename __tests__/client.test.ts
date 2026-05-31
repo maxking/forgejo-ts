@@ -148,6 +148,52 @@ describe('listPullRequests', () => {
     const detailUrl = new URL(String(mockFetch.mock.calls[1][0]));
     expect(detailUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/7');
   });
+
+  test('hydrates pull request search results in bounded batches', async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    let activeDetailRequests = 0;
+    let maxActiveDetailRequests = 0;
+
+    mockFetch.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/repos/owner/repo/issues') {
+        return jsonResponse(Array.from({ length: 6 }, (_, i) => ({
+          number: i + 1,
+          title: `Search hit ${i + 1}`,
+          pull_request: { url: `https://git.example.com/api/v1/repos/owner/repo/pulls/${i + 1}` }
+        })));
+      }
+
+      activeDetailRequests++;
+      maxActiveDetailRequests = Math.max(maxActiveDetailRequests, activeDetailRequests);
+      const number = Number(url.pathname.split('/').pop());
+      return await new Promise<Response>(resolve => {
+        resolvers.push((response) => {
+          activeDetailRequests--;
+          resolve(response);
+        });
+        if (resolvers.length === 5) {
+          for (const resolver of resolvers.splice(0, 5)) {
+            resolver(jsonResponse({ number, title: `Hydrated ${number}` }));
+          }
+        }
+      });
+    });
+
+    const resultPromise = client.listPullRequests('owner', 'repo', { query: 'search term' });
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(maxActiveDetailRequests).toBe(5);
+
+    while (resolvers.length > 0) {
+      const resolver = resolvers.shift();
+      resolver?.(jsonResponse({ number: 6, title: 'Hydrated 6' }));
+    }
+
+    const result = await resultPromise;
+    expect(result).toHaveLength(6);
+    expect(maxActiveDetailRequests).toBe(5);
+  });
 });
 
 describe('getPullRequest', () => {
