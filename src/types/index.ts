@@ -1,6 +1,16 @@
-export { User, UserRef, Label, CreateRepositoryOptions, RepositoryInfo } from './common.js';
+export {
+  User,
+  UserRef,
+  Label,
+  PaginationOptions,
+  PaginatedResult,
+  RepositorySearchOptions,
+  CreateRepositoryOptions,
+  RepositoryInfo
+} from './common.js';
 export {
   PullRequestListOptions,
+  PullRequestSearchOptions,
   PullRequest,
   PullRequestListItem,
   PullRequestFile,

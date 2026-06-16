@@ -11,14 +11,20 @@ beforeEach(() => {
   mockFetch.mockClear();
 });
 
-function jsonResponse(data: unknown, status = 200) {
+function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : status === 404 ? 'Not Found' : 'Error',
     json: async () => data,
     text: async () => JSON.stringify(data),
-    headers: { get: (name: string) => name === 'content-type' ? 'application/json' : null },
+    headers: {
+      get: (name: string) => {
+        const lowerName = name.toLowerCase();
+        if (lowerName === 'content-type') return 'application/json';
+        return headers[lowerName] ?? null;
+      }
+    },
   } as unknown as Response;
 }
 
@@ -128,11 +134,30 @@ describe('listPullRequests', () => {
     expect(url.searchParams.get('state')).toBe('closed');
   });
 
+  test('fetches one pull request page with metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1 }], 200, { 'x-total-count': '51' }));
+
+    const result = await client.listPullRequestsPage('owner', 'repo', { state: 'open', page: 1, limit: 50 });
+
+    expect(result).toEqual({
+      items: [{ number: 1 }],
+      page: 1,
+      limit: 50,
+      hasMore: true,
+      totalCount: 51
+    });
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('50');
+  });
+
   test('searches pull requests via issues endpoint and hydrates PR details', async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse([
         { number: 7, title: 'Search hit', pull_request: { url: 'https://git.example.com/api/v1/repos/owner/repo/pulls/7' } }
-      ]))
+      ], 200, { 'x-total-count': '1' }))
       .mockResolvedValueOnce(jsonResponse({ number: 7, title: 'Search hit', merged: false, draft: false }));
 
     const result = await client.listPullRequests('owner', 'repo', { state: 'open', query: 'search term' });
@@ -147,6 +172,71 @@ describe('listPullRequests', () => {
 
     const detailUrl = new URL(String(mockFetch.mock.calls[1][0]));
     expect(detailUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/7');
+  });
+
+  test('searches one pull request page via issues endpoint and preserves page metadata', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse([
+        { number: 7, title: 'Search hit', pull_request: { url: 'https://git.example.com/api/v1/repos/owner/repo/pulls/7' } }
+      ], 200, { 'x-total-count': '2' }))
+      .mockResolvedValueOnce(jsonResponse({ number: 7, title: 'Search hit', merged: false, draft: false }));
+
+    const result = await client.searchPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: 'search term',
+      page: 1,
+      limit: 1
+    });
+
+    expect(result.items).toEqual([{ number: 7, title: 'Search hit', merged: false, draft: false }]);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(1);
+    expect(result.totalCount).toBe(2);
+    expect(result.hasMore).toBe(true);
+  });
+
+  test('maps compatible pull request search filters to the issues search endpoint', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: 'search term',
+      labels: [10, 20],
+      milestone: 5,
+      poster: 'alice',
+      sort: 'recentupdate',
+      page: 2,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(url.searchParams.get('type')).toBe('pulls');
+    expect(url.searchParams.get('q')).toBe('search term');
+    expect(url.searchParams.get('labels')).toBe('10,20');
+    expect(url.searchParams.get('milestones')).toBe('5');
+    expect(url.searchParams.get('created_by')).toBe('alice');
+    expect(url.searchParams.get('sort')).toBe('recentupdate');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('limit')).toBe('25');
+  });
+
+  test('blank direct pull request search falls back to normal pull request listing', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1 }]));
+
+    const result = await client.searchPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: '   ',
+      page: 1,
+      limit: 10
+    });
+
+    expect(result.items).toEqual([{ number: 1 }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('q')).toBeNull();
+    expect(url.searchParams.get('type')).toBeNull();
   });
 
   test('hydrates pull request search results in bounded batches', async () => {
@@ -413,7 +503,7 @@ describe('listIssues', () => {
     expect(url.searchParams.get('q')).toBe('crash login');
   });
 
-  test('uses legacy issue list endpoint when query is blank', async () => {
+  test('uses issue-only list endpoint when query is blank', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse([]));
 
     await client.listIssues('owner', 'repo', { state: 'closed', query: '   ' });
@@ -421,8 +511,42 @@ describe('listIssues', () => {
     const url = new URL(String(mockFetch.mock.calls[0][0]));
     expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
     expect(url.searchParams.get('state')).toBe('closed');
-    expect(url.searchParams.get('type')).toBeNull();
+    expect(url.searchParams.get('type')).toBe('issues');
     expect(url.searchParams.get('q')).toBeNull();
+  });
+
+  test('fetches one issue page with search filters and metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1, title: 'Crash on login' }], 200, { 'x-total-count': '2' }));
+
+    const result = await client.listIssuesPage('owner', 'repo', {
+      state: 'open',
+      query: 'crash',
+      labels: 'bug,frontend',
+      milestones: 'v1',
+      createdBy: 'alice',
+      assignedBy: 'bob',
+      mentionedBy: 'carol',
+      sort: 'recentupdate',
+      page: 1,
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      items: [{ number: 1, title: 'Crash on login' }],
+      page: 1,
+      limit: 1,
+      hasMore: true,
+      totalCount: 2
+    });
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.searchParams.get('type')).toBe('issues');
+    expect(url.searchParams.get('q')).toBe('crash');
+    expect(url.searchParams.get('labels')).toBe('bug,frontend');
+    expect(url.searchParams.get('milestones')).toBe('v1');
+    expect(url.searchParams.get('created_by')).toBe('alice');
+    expect(url.searchParams.get('assigned_by')).toBe('bob');
+    expect(url.searchParams.get('mentioned_by')).toBe('carol');
+    expect(url.searchParams.get('sort')).toBe('recentupdate');
   });
 });
 
@@ -567,6 +691,24 @@ describe('listWorkflowRuns', () => {
       expect.stringContaining('branch=main'),
       expect.any(Object)
     );
+  });
+
+  test('encodes workflow run page filters', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ total_count: 0, workflow_runs: [] }));
+
+    await client.listWorkflowRunsPage('owner', 'repo', {
+      status: 'success',
+      branch: 'feature/a&b?c',
+      page: 3,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/actions/tasks');
+    expect(url.searchParams.get('status')).toBe('success');
+    expect(url.searchParams.get('branch')).toBe('feature/a&b?c');
+    expect(url.searchParams.get('page')).toBe('3');
+    expect(url.searchParams.get('limit')).toBe('25');
   });
 });
 
@@ -941,6 +1083,23 @@ describe('searchRepositories', () => {
     expect(firstUrl.searchParams.get('limit')).toBe('3');
     expect(secondUrl.searchParams.get('page')).toBe('2');
     expect(secondUrl.searchParams.get('limit')).toBe('3');
+  });
+
+  test('returns repository search page metadata from count fields', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      data: [{ name: 'repo-1' }],
+      total_count: 2
+    }));
+
+    const result = await client.searchRepositoriesPage({ query: 'forgejo', page: 1, limit: 1 });
+
+    expect(result).toEqual({
+      items: [{ name: 'repo-1' }],
+      page: 1,
+      limit: 1,
+      hasMore: true,
+      totalCount: 2
+    });
   });
 });
 

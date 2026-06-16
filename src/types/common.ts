@@ -16,6 +16,25 @@ export interface Label {
   color: string;
 }
 
+export interface PaginationOptions {
+  /** Page number of results to return (1-based). Defaults to 1. */
+  page?: number;
+  /** Page size of results. Defaults to 50. */
+  limit?: number;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  page: number;
+  limit: number;
+  hasMore: boolean;
+  totalCount: number | null;
+}
+
+export interface RepositorySearchOptions extends PaginationOptions {
+  query?: string;
+}
+
 export interface CreateRepositoryOptions {
   /** Repository name (required) */
   name: string;
