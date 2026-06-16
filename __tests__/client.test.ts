@@ -153,6 +153,66 @@ describe('listPullRequests', () => {
     expect(url.searchParams.get('limit')).toBe('50');
   });
 
+  test('fetches one pull request page with optional pull filters', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listPullRequestsPage('owner', 'repo', {
+      state: 'closed',
+      labels: [10, 20],
+      milestone: 3,
+      poster: 'alice',
+      sort: 'oldest',
+      page: 2,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.getAll('labels')).toEqual(['10', '20']);
+    expect(url.searchParams.get('milestone')).toBe('3');
+    expect(url.searchParams.get('poster')).toBe('alice');
+    expect(url.searchParams.get('sort')).toBe('oldest');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('limit')).toBe('25');
+  });
+
+  test('throws ForgejoApiError for failed page requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'bad request' }, 400));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoApiError);
+  });
+
+  test('wraps fetch failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('wraps timeout failures from page requests', async () => {
+    const timeoutError = new Error('timed out');
+    timeoutError.name = 'TimeoutError';
+    mockFetch.mockRejectedValueOnce(timeoutError);
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('wraps generic Error failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('rethrows non-Error failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce('boom');
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toBe('boom');
+  });
+
   test('searches pull requests via issues endpoint and hydrates PR details', async () => {
     mockFetch
       .mockResolvedValueOnce(jsonResponse([
@@ -314,6 +374,12 @@ describe('createPullRequest', () => {
     await expect(client.createPullRequest('owner', 'repo', 'Dup', 'feature', 'main'))
       .rejects.toThrow(ForgejoApiError);
   });
+
+  test('throws on 422 validation errors', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'invalid' }, 422));
+    await expect(client.createPullRequest('owner', 'repo', 'Invalid', 'feature', 'main'))
+      .rejects.toThrow(ForgejoApiError);
+  });
 });
 
 describe('updatePullRequest', () => {
@@ -339,6 +405,12 @@ describe('mergePullRequest', () => {
 
   test('throws on 409 conflict', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}, 409));
+    await expect(client.mergePullRequest('owner', 'repo', 1))
+      .rejects.toThrow(ForgejoApiError);
+  });
+
+  test('rethrows other merge errors unchanged', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'server error' }, 500));
     await expect(client.mergePullRequest('owner', 'repo', 1))
       .rejects.toThrow(ForgejoApiError);
   });
@@ -1365,6 +1437,18 @@ describe('job index resolution from scraped run data', () => {
       { summary: 'Complete job', duration: '1s', status: 'success' },
     ]);
   });
+
+  test('throws when scraped mapping has no matching id or name', async () => {
+    const mappingHtml = makeJobPageHtml([{ id: 999, name: 'other', status: 'success' }], []);
+    mockFetch.mockResolvedValueOnce(textResponse(mappingHtml));
+
+    await expect(client.getJobSteps('owner', 'repo', 471, {
+      jobId: 43113,
+      jobName: 'missing',
+    })).rejects.toThrow('Workflow job reference requires jobHtmlUrl or jobIndex');
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('getJobSteps edge cases', () => {
@@ -1389,6 +1473,15 @@ describe('getJobSteps edge cases', () => {
   test('throws when job ref is missing usable identifiers', async () => {
     await expect(client.getWorkflowLogs('owner', 'repo', 5, {}))
       .rejects.toThrow('Workflow job reference requires jobHtmlUrl or jobIndex');
+  });
+
+  test('getRunJobMapping returns empty maps when scraped page has no embedded data', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('<html>No job data</html>'));
+
+    const mapping = await client.getRunJobMapping('owner', 'repo', 42);
+
+    expect(mapping.byId.size).toBe(0);
+    expect(mapping.byName.size).toBe(0);
   });
 });
 
