@@ -11,14 +11,20 @@ beforeEach(() => {
   mockFetch.mockClear();
 });
 
-function jsonResponse(data: unknown, status = 200) {
+function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : status === 404 ? 'Not Found' : 'Error',
     json: async () => data,
     text: async () => JSON.stringify(data),
-    headers: { get: (name: string) => name === 'content-type' ? 'application/json' : null },
+    headers: {
+      get: (name: string) => {
+        const lowerName = name.toLowerCase();
+        if (lowerName === 'content-type') return 'application/json';
+        return headers[lowerName] ?? null;
+      }
+    },
   } as unknown as Response;
 }
 
@@ -118,6 +124,226 @@ describe('listPullRequests', () => {
       expect.any(Object)
     );
   });
+
+  test('accepts options with state', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    await client.listPullRequests('owner', 'repo', { state: 'closed' });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('closed');
+  });
+
+  test('fetches one pull request page with metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1 }], 200, { 'x-total-count': '51' }));
+
+    const result = await client.listPullRequestsPage('owner', 'repo', { state: 'open', page: 1, limit: 50 });
+
+    expect(result).toEqual({
+      items: [{ number: 1 }],
+      page: 1,
+      limit: 50,
+      hasMore: true,
+      totalCount: 51
+    });
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('50');
+  });
+
+  test('fetches one pull request page with optional pull filters', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listPullRequestsPage('owner', 'repo', {
+      state: 'closed',
+      labels: [10, 20],
+      milestone: 3,
+      poster: 'alice',
+      sort: 'oldest',
+      page: 2,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.getAll('labels')).toEqual(['10', '20']);
+    expect(url.searchParams.get('milestone')).toBe('3');
+    expect(url.searchParams.get('poster')).toBe('alice');
+    expect(url.searchParams.get('sort')).toBe('oldest');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('limit')).toBe('25');
+  });
+
+  test('throws ForgejoApiError for failed page requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'bad request' }, 400));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoApiError);
+  });
+
+  test('wraps fetch failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('wraps timeout failures from page requests', async () => {
+    const timeoutError = new Error('timed out');
+    timeoutError.name = 'TimeoutError';
+    mockFetch.mockRejectedValueOnce(timeoutError);
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('wraps generic Error failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toThrow(ForgejoNetworkError);
+  });
+
+  test('rethrows non-Error failures from page requests', async () => {
+    mockFetch.mockRejectedValueOnce('boom');
+
+    await expect(client.listPullRequestsPage('owner', 'repo'))
+      .rejects.toBe('boom');
+  });
+
+  test('searches pull requests via issues endpoint and hydrates PR details', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse([
+        { number: 7, title: 'Search hit', pull_request: { url: 'https://git.example.com/api/v1/repos/owner/repo/pulls/7' } }
+      ], 200, { 'x-total-count': '1' }))
+      .mockResolvedValueOnce(jsonResponse({ number: 7, title: 'Search hit', merged: false, draft: false }));
+
+    const result = await client.listPullRequests('owner', 'repo', { state: 'open', query: 'search term' });
+
+    expect(result).toEqual([{ number: 7, title: 'Search hit', merged: false, draft: false }]);
+
+    const searchUrl = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(searchUrl.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(searchUrl.searchParams.get('state')).toBe('open');
+    expect(searchUrl.searchParams.get('type')).toBe('pulls');
+    expect(searchUrl.searchParams.get('q')).toBe('search term');
+
+    const detailUrl = new URL(String(mockFetch.mock.calls[1][0]));
+    expect(detailUrl.pathname).toBe('/api/v1/repos/owner/repo/pulls/7');
+  });
+
+  test('searches one pull request page via issues endpoint and preserves page metadata', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse([
+        { number: 7, title: 'Search hit', pull_request: { url: 'https://git.example.com/api/v1/repos/owner/repo/pulls/7' } }
+      ], 200, { 'x-total-count': '2' }))
+      .mockResolvedValueOnce(jsonResponse({ number: 7, title: 'Search hit', merged: false, draft: false }));
+
+    const result = await client.searchPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: 'search term',
+      page: 1,
+      limit: 1
+    });
+
+    expect(result.items).toEqual([{ number: 7, title: 'Search hit', merged: false, draft: false }]);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(1);
+    expect(result.totalCount).toBe(2);
+    expect(result.hasMore).toBe(true);
+  });
+
+  test('maps compatible pull request search filters to the issues search endpoint', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: 'search term',
+      labels: [10, 20],
+      milestone: 5,
+      poster: 'alice',
+      sort: 'recentupdate',
+      page: 2,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(url.searchParams.get('type')).toBe('pulls');
+    expect(url.searchParams.get('q')).toBe('search term');
+    expect(url.searchParams.get('labels')).toBe('10,20');
+    expect(url.searchParams.get('milestones')).toBe('5');
+    expect(url.searchParams.get('created_by')).toBe('alice');
+    expect(url.searchParams.get('sort')).toBe('recentupdate');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('limit')).toBe('25');
+  });
+
+  test('blank direct pull request search falls back to normal pull request listing', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1 }]));
+
+    const result = await client.searchPullRequestsPage('owner', 'repo', {
+      state: 'open',
+      query: '   ',
+      page: 1,
+      limit: 10
+    });
+
+    expect(result.items).toEqual([{ number: 1 }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/pulls');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('q')).toBeNull();
+    expect(url.searchParams.get('type')).toBeNull();
+  });
+
+  test('hydrates pull request search results in bounded batches', async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    let activeDetailRequests = 0;
+    let maxActiveDetailRequests = 0;
+
+    mockFetch.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/repos/owner/repo/issues') {
+        return jsonResponse(Array.from({ length: 6 }, (_, i) => ({
+          number: i + 1,
+          title: `Search hit ${i + 1}`,
+          pull_request: { url: `https://git.example.com/api/v1/repos/owner/repo/pulls/${i + 1}` }
+        })));
+      }
+
+      activeDetailRequests++;
+      maxActiveDetailRequests = Math.max(maxActiveDetailRequests, activeDetailRequests);
+      const number = Number(url.pathname.split('/').pop());
+      return await new Promise<Response>(resolve => {
+        resolvers.push((response) => {
+          activeDetailRequests--;
+          resolve(response);
+        });
+        if (resolvers.length === 5) {
+          for (const resolver of resolvers.splice(0, 5)) {
+            resolver(jsonResponse({ number, title: `Hydrated ${number}` }));
+          }
+        }
+      });
+    });
+
+    const resultPromise = client.listPullRequests('owner', 'repo', { query: 'search term' });
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(maxActiveDetailRequests).toBe(5);
+
+    while (resolvers.length > 0) {
+      const resolver = resolvers.shift();
+      resolver?.(jsonResponse({ number: 6, title: 'Hydrated 6' }));
+    }
+
+    const result = await resultPromise;
+    expect(result).toHaveLength(6);
+    expect(maxActiveDetailRequests).toBe(5);
+  });
 });
 
 describe('getPullRequest', () => {
@@ -148,6 +374,12 @@ describe('createPullRequest', () => {
     await expect(client.createPullRequest('owner', 'repo', 'Dup', 'feature', 'main'))
       .rejects.toThrow(ForgejoApiError);
   });
+
+  test('throws on 422 validation errors', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'invalid' }, 422));
+    await expect(client.createPullRequest('owner', 'repo', 'Invalid', 'feature', 'main'))
+      .rejects.toThrow(ForgejoApiError);
+  });
 });
 
 describe('updatePullRequest', () => {
@@ -173,6 +405,12 @@ describe('mergePullRequest', () => {
 
   test('throws on 409 conflict', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}, 409));
+    await expect(client.mergePullRequest('owner', 'repo', 1))
+      .rejects.toThrow(ForgejoApiError);
+  });
+
+  test('rethrows other merge errors unchanged', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'server error' }, 500));
     await expect(client.mergePullRequest('owner', 'repo', 1))
       .rejects.toThrow(ForgejoApiError);
   });
@@ -323,6 +561,65 @@ describe('listIssues', () => {
     expect(result).toHaveLength(1);
     expect(result[0].number).toBe(1);
   });
+
+  test('accepts options with state and query', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1, title: 'Crash on login' }]));
+
+    const result = await client.listIssues('owner', 'repo', { state: 'open', query: 'crash login' });
+
+    expect(result).toEqual([{ number: 1, title: 'Crash on login' }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(url.searchParams.get('state')).toBe('open');
+    expect(url.searchParams.get('type')).toBe('issues');
+    expect(url.searchParams.get('q')).toBe('crash login');
+  });
+
+  test('uses issue-only list endpoint when query is blank', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.listIssues('owner', 'repo', { state: 'closed', query: '   ' });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(url.searchParams.get('state')).toBe('closed');
+    expect(url.searchParams.get('type')).toBe('issues');
+    expect(url.searchParams.get('q')).toBeNull();
+  });
+
+  test('fetches one issue page with search filters and metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ number: 1, title: 'Crash on login' }], 200, { 'x-total-count': '2' }));
+
+    const result = await client.listIssuesPage('owner', 'repo', {
+      state: 'open',
+      query: 'crash',
+      labels: 'bug,frontend',
+      milestones: 'v1',
+      createdBy: 'alice',
+      assignedBy: 'bob',
+      mentionedBy: 'carol',
+      sort: 'recentupdate',
+      page: 1,
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      items: [{ number: 1, title: 'Crash on login' }],
+      page: 1,
+      limit: 1,
+      hasMore: true,
+      totalCount: 2
+    });
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.searchParams.get('type')).toBe('issues');
+    expect(url.searchParams.get('q')).toBe('crash');
+    expect(url.searchParams.get('labels')).toBe('bug,frontend');
+    expect(url.searchParams.get('milestones')).toBe('v1');
+    expect(url.searchParams.get('created_by')).toBe('alice');
+    expect(url.searchParams.get('assigned_by')).toBe('bob');
+    expect(url.searchParams.get('mentioned_by')).toBe('carol');
+    expect(url.searchParams.get('sort')).toBe('recentupdate');
+  });
 });
 
 describe('getIssue', () => {
@@ -466,6 +763,24 @@ describe('listWorkflowRuns', () => {
       expect.stringContaining('branch=main'),
       expect.any(Object)
     );
+  });
+
+  test('encodes workflow run page filters', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ total_count: 0, workflow_runs: [] }));
+
+    await client.listWorkflowRunsPage('owner', 'repo', {
+      status: 'success',
+      branch: 'feature/a&b?c',
+      page: 3,
+      limit: 25
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/actions/tasks');
+    expect(url.searchParams.get('status')).toBe('success');
+    expect(url.searchParams.get('branch')).toBe('feature/a&b?c');
+    expect(url.searchParams.get('page')).toBe('3');
+    expect(url.searchParams.get('limit')).toBe('25');
   });
 });
 
@@ -841,6 +1156,23 @@ describe('searchRepositories', () => {
     expect(secondUrl.searchParams.get('page')).toBe('2');
     expect(secondUrl.searchParams.get('limit')).toBe('3');
   });
+
+  test('returns repository search page metadata from count fields', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      data: [{ name: 'repo-1' }],
+      total_count: 2
+    }));
+
+    const result = await client.searchRepositoriesPage({ query: 'forgejo', page: 1, limit: 1 });
+
+    expect(result).toEqual({
+      items: [{ name: 'repo-1' }],
+      page: 1,
+      limit: 1,
+      hasMore: true,
+      totalCount: 2
+    });
+  });
 });
 
 // ==================== Raw API ====================
@@ -1105,6 +1437,18 @@ describe('job index resolution from scraped run data', () => {
       { summary: 'Complete job', duration: '1s', status: 'success' },
     ]);
   });
+
+  test('throws when scraped mapping has no matching id or name', async () => {
+    const mappingHtml = makeJobPageHtml([{ id: 999, name: 'other', status: 'success' }], []);
+    mockFetch.mockResolvedValueOnce(textResponse(mappingHtml));
+
+    await expect(client.getJobSteps('owner', 'repo', 471, {
+      jobId: 43113,
+      jobName: 'missing',
+    })).rejects.toThrow('Workflow job reference requires jobHtmlUrl or jobIndex');
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('getJobSteps edge cases', () => {
@@ -1129,6 +1473,15 @@ describe('getJobSteps edge cases', () => {
   test('throws when job ref is missing usable identifiers', async () => {
     await expect(client.getWorkflowLogs('owner', 'repo', 5, {}))
       .rejects.toThrow('Workflow job reference requires jobHtmlUrl or jobIndex');
+  });
+
+  test('getRunJobMapping returns empty maps when scraped page has no embedded data', async () => {
+    mockFetch.mockResolvedValueOnce(textResponse('<html>No job data</html>'));
+
+    const mapping = await client.getRunJobMapping('owner', 'repo', 42);
+
+    expect(mapping.byId.size).toBe(0);
+    expect(mapping.byName.size).toBe(0);
   });
 });
 

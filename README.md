@@ -4,7 +4,15 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
-### Unreleased
+### 0.4.0
+
+* Add typed page-level list/search APIs for pull requests, issues, PR files, reviews, comments, timelines, workflow runs, statuses, tags, releases, and repository search.
+* Export shared pagination types so UI clients can implement load-more flows without raw API calls or unbounded list fetches.
+* Keep all existing all-pages list methods backward compatible by building them on the new paginated APIs.
+
+### 0.3.3
+
+* Add typed issue and pull request list options, including server-side free-text search for issues and pull requests. Pull request search hydrates matching PR details in bounded batches.
 
 ### 0.3.2
 
@@ -49,8 +57,17 @@ const client = new ForgejoClient({
 // List open pull requests
 const prs = await client.listPullRequests('owner', 'repo', 'open');
 
+// Fetch one page for load-more UIs
+const prPage = await client.listPullRequestsPage('owner', 'repo', { state: 'open', page: 1, limit: 50 });
+
+// Search open pull requests by title/body
+const matchingPrs = await client.listPullRequests('owner', 'repo', { state: 'open', query: 'bugfix' });
+
 // Get issue details
 const issue = await client.getIssue('owner', 'repo', 42);
+
+// Search open issues by title/body
+const matchingIssues = await client.listIssues('owner', 'repo', { state: 'open', query: 'crash' });
 
 // Create a pull request
 const pr = await client.createPullRequest('owner', 'repo', 'My PR', 'feature-branch', 'main', 'Description');
@@ -95,36 +112,47 @@ new ForgejoClient(options: {
 |----------|--------|-------------|
 | Connection | `testConnection()` | Test connectivity, returns `boolean` |
 | **Pull Requests** | | |
-| | `listPullRequests(owner, repo, state?)` | List PRs (paginates automatically) |
+| | `listPullRequests(owner, repo, stateOrOptions?)` | List PRs (paginates automatically); accepts state string or `{ state, query }` |
+| | `listPullRequestsPage(owner, repo, options?)` | List one PR page with pagination metadata |
+| | `searchPullRequestsPage(owner, repo, options)` | Search one PR page by title/body with pagination metadata |
 | | `getPullRequest(owner, repo, number)` | Get PR details |
 | | `createPullRequest(owner, repo, title, head, base, body?)` | Create a PR |
 | | `updatePullRequest(owner, repo, number, updates)` | Update PR title/body/state |
 | | `mergePullRequest(owner, repo, number, method?, deleteBranch?)` | Merge a PR |
 | | `closePullRequest(owner, repo, number)` | Close a PR |
 | | `getPullRequestFiles(owner, repo, number)` | List changed files (paginates automatically) |
+| | `getPullRequestFilesPage(owner, repo, number, options?)` | List one changed-file page |
 | | `getPullRequestRefs(owner, repo, number)` | Get head/base branch refs |
 | | `getPullRequestReviews(owner, repo, number)` | List reviews (paginates automatically) |
+| | `getPullRequestReviewsPage(owner, repo, number, options?)` | List one review page |
 | | `getPullRequestCommits(owner, repo, number)` | List commits (paginates automatically) |
+| | `getPullRequestCommitsPage(owner, repo, number, options?)` | List one commit page |
 | **Reviews** | | |
 | | `getReviewComments(owner, repo, prNumber, reviewId)` | Get review comments (paginates automatically) |
+| | `getReviewCommentsPage(owner, repo, prNumber, reviewId, options?)` | Get one review-comment page |
 | | `createReview(owner, repo, number, state, body)` | Create a review |
 | | `createReviewWithComments(owner, repo, prNumber, options)` | Create review with inline comments |
 | **Issues** | | |
-| | `listIssues(owner, repo, state?)` | List issues (PRs filtered out) |
+| | `listIssues(owner, repo, stateOrOptions?)` | List issues (PRs filtered out, paginates automatically); accepts state string or `{ state, query }` |
+| | `listIssuesPage(owner, repo, options?)` | List/search one issue page with pagination metadata |
 | | `getIssue(owner, repo, number)` | Get issue details |
 | | `createIssue(owner, repo, title, body?)` | Create an issue |
 | | `updateIssue(owner, repo, number, updates)` | Update issue title/body/state |
 | | `getIssueComments(owner, repo, number)` | List comments (paginates automatically) |
+| | `getIssueCommentsPage(owner, repo, number, options?)` | List one issue-comment page |
 | | `createComment(owner, repo, number, body)` | Add a comment |
 | | `getIssueTimeline(owner, repo, number)` | Get timeline events (paginates automatically) |
+| | `getIssueTimelinePage(owner, repo, number, options?)` | Get one timeline page |
 | **Repositories** | | |
 | | `createRepository(options)` | Create a repository for the authenticated user |
 | | `createOrgRepository(org, options)` | Create a repository in an organization |
 | | `searchRepositories(query?, limit?)` | Search repositories (paginates automatically) |
+| | `searchRepositoriesPage(options?)` | Search one repository page |
 | **Files** | | |
 | | `getFileContents(owner, repo, filepath, ref)` | Get decoded file contents |
 | **CI / Actions** | | |
 | | `listWorkflowRuns(owner, repo, options?)` | List workflow runs (paginates) |
+| | `listWorkflowRunsPage(owner, repo, options?)` | List one workflow-run page |
 | | `getWorkflowRun(owner, repo, runId)` | Get run details |
 | | `getWorkflowJobs(owner, repo, runId)` | Get jobs for a run |
 | | `getWorkflowLogs(owner, repo, runNumber, jobIndex?)` | Fetch job logs |
@@ -132,12 +160,15 @@ new ForgejoClient(options: {
 | | `getRunJobMapping(owner, repo, runNumber)` | Map job database IDs to positional indices |
 | | `rerunWorkflow(owner, repo, runId)` | Re-run a workflow |
 | | `getCommitStatuses(owner, repo, sha)` | Get commit statuses (paginates automatically) |
+| | `getCommitStatusesPage(owner, repo, sha, options?)` | Get one commit-status page |
 | **Tags** | | |
 | | `listTags(owner, repo)` | List tags |
+| | `listTagsPage(owner, repo, options?)` | List one tag page |
 | | `createTag(owner, repo, options)` | Create a tag |
 | | `deleteTag(owner, repo, tagName)` | Delete a tag |
 | **Releases** | | |
 | | `listReleases(owner, repo)` | List releases |
+| | `listReleasesPage(owner, repo, options?)` | List one release page |
 | | `createRelease(owner, repo, options)` | Create a release |
 | | `getRelease(owner, repo, id)` | Get release by ID |
 | | `getReleaseByTag(owner, repo, tag)` | Get release by tag name |

@@ -1,14 +1,14 @@
 import { ForgejoApiError, ForgejoNetworkError } from './errors.js';
 import { ForgejoLogger, noopLogger } from './logger.js';
 import {
-  PullRequest, PullRequestListItem, PullRequestFile,
+  PullRequest, PullRequestListItem, PullRequestListOptions, PullRequestSearchOptions, PullRequestFile,
   FileContentsResponse, CommitStatus, PullRequestReview, PullRequestCommit,
-  Issue, IssueListItem, IssueComment, TimelineEvent,
-  ActionTasksResponse, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef,
+  Issue, IssueListItem, IssueListOptions, IssueComment, TimelineEvent,
+  ActionTasksResponse, WorkflowRunListItem, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef,
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
-  CreateRepositoryOptions, RepositoryInfo,
+  CreateRepositoryOptions, RepositoryInfo, PaginatedResult, RepositorySearchOptions,
 } from './types/index.js';
 
 export interface ForgejoClientOptions {
@@ -78,22 +78,92 @@ export class ForgejoClient {
     }
   }
 
-  private async requestAllPages<T>(endpoint: string, limit = 50): Promise<T[]> {
+  private parseTotalCount(response: Response): number | null {
+    const totalCount = response.headers?.get?.('x-total-count');
+    if (!totalCount) return null;
+
+    const parsed = Number.parseInt(totalCount, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  private paginatedResult<T>(
+    items: T[],
+    page: number,
+    limit: number,
+    totalCount: number | null
+  ): PaginatedResult<T> {
+    return {
+      items,
+      page,
+      limit,
+      totalCount,
+      hasMore: totalCount === null ? items.length === limit : page * limit < totalCount
+    };
+  }
+
+  private async requestPage<T>(endpoint: string, page = 1, limit = 50): Promise<PaginatedResult<T>> {
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const url = `${this.instanceUrl}/api/v1${endpoint}${sep}page=${page}&limit=${limit}`;
+    this.logger.debug('GET', url);
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.buildHeaders(),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new ForgejoApiError(response.status, response.statusText, body);
+      }
+
+      const items = await response.json() as T[];
+      return this.paginatedResult(items, page, limit, this.parseTotalCount(response));
+    } catch (error) {
+      if (error instanceof ForgejoApiError) throw error;
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new ForgejoNetworkError(url, error);
+      }
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new ForgejoNetworkError(url, error);
+      }
+      if (error instanceof Error) {
+        throw new ForgejoNetworkError(url, error);
+      }
+      throw error;
+    }
+  }
+
+  private appendParam(params: URLSearchParams, key: string, value: string | number | undefined): void {
+    if (value !== undefined && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+
+  private async collectAllPages<T>(fetchPage: (page: number) => Promise<PaginatedResult<T>>): Promise<T[]> {
     const allItems: T[] = [];
     let page = 1;
 
     for (;;) {
-      const sep = endpoint.includes('?') ? '&' : '?';
-      const items = await this.request<T[]>(`${endpoint}${sep}page=${page}&limit=${limit}`);
-      allItems.push(...items);
-      // Forgejo list endpoints do not consistently expose a total count, so we stop
-      // once a page is shorter than the requested limit. If the final page happens
-      // to be exactly `limit` items, this may perform one extra empty-page request.
-      if (items.length < limit) break;
+      const result = await fetchPage(page);
+      allItems.push(...result.items);
+      if (!result.hasMore) break;
       page++;
     }
 
     return allItems;
+  }
+
+  private async mapInBatches<T, R>(items: T[], batchSize: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+    const results: R[] = [];
+
+    for (let start = 0; start < items.length; start += batchSize) {
+      const batch = items.slice(start, start + batchSize);
+      results.push(...await Promise.all(batch.map(mapper)));
+    }
+
+    return results;
   }
 
   private async requestWithBody<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
@@ -179,8 +249,92 @@ export class ForgejoClient {
 
   // ======================== Pull Requests ========================
 
-  async listPullRequests(owner: string, repo: string, state: 'open' | 'closed' | 'all' = 'all'): Promise<PullRequestListItem[]> {
-    return this.requestAllPages<PullRequestListItem>(`/repos/${owner}/${repo}/pulls?state=${state}`);
+  async listPullRequests(
+    owner: string,
+    repo: string,
+    stateOrOptions: 'open' | 'closed' | 'all' | PullRequestListOptions = 'all'
+  ): Promise<PullRequestListItem[]> {
+    const options = typeof stateOrOptions === 'string' ? { state: stateOrOptions } : stateOrOptions;
+    return this.collectAllPages(page => this.listPullRequestsPage(owner, repo, { ...options, page }));
+  }
+
+  async listPullRequestsPage(
+    owner: string,
+    repo: string,
+    options: PullRequestListOptions = {}
+  ): Promise<PaginatedResult<PullRequestListItem>> {
+    const query = options.query?.trim();
+    if (query) {
+      return this.searchPullRequestsPage(owner, repo, {
+        state: options.state,
+        query,
+        page: options.page,
+        limit: options.limit,
+        sort: options.sort,
+        labels: options.labels?.join(','),
+        milestones: options.milestone !== undefined ? String(options.milestone) : undefined,
+        createdBy: options.poster
+      });
+    }
+
+    const params = new URLSearchParams({ state: options.state ?? 'all' });
+    this.appendParam(params, 'sort', options.sort);
+    this.appendParam(params, 'milestone', options.milestone);
+    this.appendParam(params, 'poster', options.poster);
+    for (const label of options.labels ?? []) {
+      params.append('labels', String(label));
+    }
+
+    return this.requestPage<PullRequestListItem>(
+      `/repos/${owner}/${repo}/pulls?${params}`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+  }
+
+  async searchPullRequestsPage(
+    owner: string,
+    repo: string,
+    options: PullRequestSearchOptions
+  ): Promise<PaginatedResult<PullRequestListItem>> {
+    const query = options.query.trim();
+    if (!query) {
+      return this.listPullRequestsPage(owner, repo, {
+        state: options.state,
+        page: options.page,
+        limit: options.limit,
+        sort: options.sort
+      });
+    }
+
+    const params = new URLSearchParams({
+      state: options.state ?? 'all',
+      type: 'pulls',
+      q: query
+    });
+    this.appendParam(params, 'labels', options.labels);
+    this.appendParam(params, 'milestones', options.milestones);
+    this.appendParam(params, 'since', options.since);
+    this.appendParam(params, 'before', options.before);
+    this.appendParam(params, 'created_by', options.createdBy);
+    this.appendParam(params, 'assigned_by', options.assignedBy);
+    this.appendParam(params, 'mentioned_by', options.mentionedBy);
+    this.appendParam(params, 'sort', options.sort);
+
+    const matches = await this.requestPage<IssueListItem>(
+      `/repos/${owner}/${repo}/issues?${params}`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+    const pullRequestNumbers = matches.items
+      .filter(item => item.pull_request)
+      .map(item => item.number);
+    const items = await this.mapInBatches(pullRequestNumbers, 5, number => this.getPullRequest(owner, repo, number));
+
+    return {
+      ...matches,
+      items
+    };
   }
 
   async getPullRequest(owner: string, repo: string, number: number): Promise<PullRequest> {
@@ -244,7 +398,20 @@ export class ForgejoClient {
   }
 
   async getPullRequestFiles(owner: string, repo: string, number: number): Promise<PullRequestFile[]> {
-    return this.requestAllPages<PullRequestFile>(`/repos/${owner}/${repo}/pulls/${number}/files`);
+    return this.collectAllPages(page => this.getPullRequestFilesPage(owner, repo, number, { page }));
+  }
+
+  async getPullRequestFilesPage(
+    owner: string,
+    repo: string,
+    number: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<PullRequestFile>> {
+    return this.requestPage<PullRequestFile>(
+      `/repos/${owner}/${repo}/pulls/${number}/files`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async getPullRequestRefs(owner: string, repo: string, number: number): Promise<{ base: string; head: string }> {
@@ -253,17 +420,57 @@ export class ForgejoClient {
   }
 
   async getPullRequestReviews(owner: string, repo: string, number: number): Promise<PullRequestReview[]> {
-    return this.requestAllPages<PullRequestReview>(`/repos/${owner}/${repo}/pulls/${number}/reviews`);
+    return this.collectAllPages(page => this.getPullRequestReviewsPage(owner, repo, number, { page }));
+  }
+
+  async getPullRequestReviewsPage(
+    owner: string,
+    repo: string,
+    number: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<PullRequestReview>> {
+    return this.requestPage<PullRequestReview>(
+      `/repos/${owner}/${repo}/pulls/${number}/reviews`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async getPullRequestCommits(owner: string, repo: string, number: number): Promise<PullRequestCommit[]> {
-    return this.requestAllPages<PullRequestCommit>(`/repos/${owner}/${repo}/pulls/${number}/commits`);
+    return this.collectAllPages(page => this.getPullRequestCommitsPage(owner, repo, number, { page }));
+  }
+
+  async getPullRequestCommitsPage(
+    owner: string,
+    repo: string,
+    number: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<PullRequestCommit>> {
+    return this.requestPage<PullRequestCommit>(
+      `/repos/${owner}/${repo}/pulls/${number}/commits`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   // ======================== Reviews ========================
 
   async getReviewComments(owner: string, repo: string, prNumber: number, reviewId: number): Promise<ReviewComment[]> {
-    return this.requestAllPages<ReviewComment>(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments`);
+    return this.collectAllPages(page => this.getReviewCommentsPage(owner, repo, prNumber, reviewId, { page }));
+  }
+
+  async getReviewCommentsPage(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    reviewId: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<ReviewComment>> {
+    return this.requestPage<ReviewComment>(
+      `/repos/${owner}/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async createReview(
@@ -290,9 +497,43 @@ export class ForgejoClient {
 
   // ======================== Issues ========================
 
-  async listIssues(owner: string, repo: string, state: 'open' | 'closed' | 'all' = 'all'): Promise<IssueListItem[]> {
-    const items = await this.requestAllPages<IssueListItem>(`/repos/${owner}/${repo}/issues?state=${state}`);
-    return items.filter(item => !item.pull_request);
+  async listIssues(
+    owner: string,
+    repo: string,
+    stateOrOptions: 'open' | 'closed' | 'all' | IssueListOptions = 'all'
+  ): Promise<IssueListItem[]> {
+    const options = typeof stateOrOptions === 'string' ? { state: stateOrOptions } : stateOrOptions;
+    return this.collectAllPages(page => this.listIssuesPage(owner, repo, { ...options, page }));
+  }
+
+  async listIssuesPage(
+    owner: string,
+    repo: string,
+    options: IssueListOptions = {}
+  ): Promise<PaginatedResult<IssueListItem>> {
+    const params = new URLSearchParams({
+      state: options.state ?? 'all',
+      type: 'issues'
+    });
+    this.appendParam(params, 'q', options.query?.trim());
+    this.appendParam(params, 'labels', options.labels);
+    this.appendParam(params, 'milestones', options.milestones);
+    this.appendParam(params, 'since', options.since);
+    this.appendParam(params, 'before', options.before);
+    this.appendParam(params, 'created_by', options.createdBy);
+    this.appendParam(params, 'assigned_by', options.assignedBy);
+    this.appendParam(params, 'mentioned_by', options.mentionedBy);
+    this.appendParam(params, 'sort', options.sort);
+
+    const page = await this.requestPage<IssueListItem>(
+      `/repos/${owner}/${repo}/issues?${params}`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+    return {
+      ...page,
+      items: page.items.filter(item => !item.pull_request)
+    };
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<Issue> {
@@ -313,7 +554,20 @@ export class ForgejoClient {
   }
 
   async getIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]> {
-    return this.requestAllPages<IssueComment>(`/repos/${owner}/${repo}/issues/${number}/comments`);
+    return this.collectAllPages(page => this.getIssueCommentsPage(owner, repo, number, { page }));
+  }
+
+  async getIssueCommentsPage(
+    owner: string,
+    repo: string,
+    number: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<IssueComment>> {
+    return this.requestPage<IssueComment>(
+      `/repos/${owner}/${repo}/issues/${number}/comments`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async createComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment> {
@@ -321,7 +575,20 @@ export class ForgejoClient {
   }
 
   async getIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]> {
-    return this.requestAllPages<TimelineEvent>(`/repos/${owner}/${repo}/issues/${number}/timeline`);
+    return this.collectAllPages(page => this.getIssueTimelinePage(owner, repo, number, { page }));
+  }
+
+  async getIssueTimelinePage(
+    owner: string,
+    repo: string,
+    number: number,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<TimelineEvent>> {
+    return this.requestPage<TimelineEvent>(
+      `/repos/${owner}/${repo}/issues/${number}/timeline`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   // ======================== Files ========================
@@ -339,26 +606,26 @@ export class ForgejoClient {
 
   // ======================== CI / Actions ========================
 
-  async listWorkflowRuns(owner: string, repo: string, options?: { status?: string; branch?: string }): Promise<ActionTasksResponse> {
-    let endpoint = `/repos/${owner}/${repo}/actions/tasks`;
-    const params: string[] = [];
-    if (options?.status) params.push(`status=${options.status}`);
-    if (options?.branch) params.push(`branch=${options.branch}`);
-    if (params.length) endpoint += '?' + params.join('&');
-
-    const limit = 50;
-    const allRuns: ActionTasksResponse['workflow_runs'] = [];
-    let page = 1;
-
-    for (;;) {
-      const sep = endpoint.includes('?') ? '&' : '?';
-      const response = await this.request<ActionTasksResponse>(`${endpoint}${sep}page=${page}&limit=${limit}`);
-      allRuns.push(...response.workflow_runs);
-      if (response.workflow_runs.length < limit) break;
-      page++;
-    }
-
+  async listWorkflowRuns(owner: string, repo: string, options?: { status?: string; branch?: string; limit?: number }): Promise<ActionTasksResponse> {
+    const allRuns = await this.collectAllPages(page => this.listWorkflowRunsPage(owner, repo, { ...options, page }));
     return { total_count: allRuns.length, workflow_runs: allRuns };
+  }
+
+  async listWorkflowRunsPage(
+    owner: string,
+    repo: string,
+    options: { status?: string; branch?: string; page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<WorkflowRunListItem>> {
+    const params = new URLSearchParams();
+    if (options.status) params.set('status', options.status);
+    if (options.branch) params.set('branch', options.branch);
+    const endpoint = `/repos/${owner}/${repo}/actions/tasks${params.size > 0 ? `?${params}` : ''}`;
+    const page = options.page ?? 1;
+    const limit = options.limit ?? 50;
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const response = await this.request<ActionTasksResponse>(`${endpoint}${sep}page=${page}&limit=${limit}`);
+    const totalCount = response.total_count ?? null;
+    return this.paginatedResult(response.workflow_runs, page, limit, totalCount);
   }
 
   async getWorkflowRun(owner: string, repo: string, runId: number): Promise<WorkflowRun> {
@@ -520,13 +787,38 @@ export class ForgejoClient {
   }
 
   async getCommitStatuses(owner: string, repo: string, sha: string): Promise<CommitStatus[]> {
-    return this.requestAllPages<CommitStatus>(`/repos/${owner}/${repo}/statuses/${sha}`);
+    return this.collectAllPages(page => this.getCommitStatusesPage(owner, repo, sha, { page }));
+  }
+
+  async getCommitStatusesPage(
+    owner: string,
+    repo: string,
+    sha: string,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<CommitStatus>> {
+    return this.requestPage<CommitStatus>(
+      `/repos/${owner}/${repo}/statuses/${sha}`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   // ======================== Tags ========================
 
   async listTags(owner: string, repo: string): Promise<Tag[]> {
-    return this.requestAllPages<Tag>(`/repos/${owner}/${repo}/tags`);
+    return this.collectAllPages(page => this.listTagsPage(owner, repo, { page }));
+  }
+
+  async listTagsPage(
+    owner: string,
+    repo: string,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<Tag>> {
+    return this.requestPage<Tag>(
+      `/repos/${owner}/${repo}/tags`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async createTag(owner: string, repo: string, options: CreateTagOptions): Promise<Tag> {
@@ -540,7 +832,19 @@ export class ForgejoClient {
   // ======================== Releases ========================
 
   async listReleases(owner: string, repo: string): Promise<Release[]> {
-    return this.requestAllPages<Release>(`/repos/${owner}/${repo}/releases`);
+    return this.collectAllPages(page => this.listReleasesPage(owner, repo, { page }));
+  }
+
+  async listReleasesPage(
+    owner: string,
+    repo: string,
+    options: { page?: number; limit?: number } = {}
+  ): Promise<PaginatedResult<Release>> {
+    return this.requestPage<Release>(
+      `/repos/${owner}/${repo}/releases`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
   }
 
   async createRelease(owner: string, repo: string, options: CreateReleaseOptions): Promise<Release> {
@@ -570,21 +874,17 @@ export class ForgejoClient {
   }
 
   async searchRepositories(query?: string, limit = 50): Promise<RepositoryInfo[]> {
-    const allRepositories: RepositoryInfo[] = [];
-    let page = 1;
+    return this.collectAllPages(page => this.searchRepositoriesPage({ query, limit, page }));
+  }
 
-    for (;;) {
-      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-      if (query) params.set('q', query);
+  async searchRepositoriesPage(options: RepositorySearchOptions = {}): Promise<PaginatedResult<RepositoryInfo>> {
+    const page = options.page ?? 1;
+    const limit = options.limit ?? 50;
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (options.query) params.set('q', options.query);
 
-      const result = await this.request<{ data: RepositoryInfo[] }>(`/repos/search?${params}`);
-      allRepositories.push(...result.data);
-
-      if (result.data.length < limit) break;
-      page++;
-    }
-
-    return allRepositories;
+    const result = await this.request<{ data: RepositoryInfo[]; total_count?: number; count?: number }>(`/repos/search?${params}`);
+    return this.paginatedResult(result.data, page, limit, result.total_count ?? result.count ?? null);
   }
 
   // ======================== Raw API ========================

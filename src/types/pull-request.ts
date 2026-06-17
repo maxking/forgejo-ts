@@ -1,4 +1,43 @@
-import { User, UserRef, Label } from './common.js';
+import { User, UserRef, Label, PaginationOptions } from './common.js';
+import type { IssueState } from './issue.js';
+
+export interface PullRequestListOptions extends PaginationOptions {
+  /** Filter by pull request state. Defaults to 'all'. */
+  state?: IssueState;
+  /** Free-text server-side search query, matched by Forgejo against pull request title/body. */
+  query?: string;
+  /** Sort order accepted by the Forgejo API. */
+  sort?: string;
+  /** Filter by milestone ID. */
+  milestone?: number;
+  /** Filter by label IDs. */
+  labels?: number[];
+  /** Filter by pull request author. */
+  poster?: string;
+}
+
+export interface PullRequestSearchOptions extends PaginationOptions {
+  /** Filter by pull request state. Defaults to 'all'. */
+  state?: IssueState;
+  /** Free-text server-side search query, matched by Forgejo against pull request title/body. */
+  query: string;
+  /** Comma-separated label names or IDs for the issues search endpoint. */
+  labels?: string;
+  /** Comma-separated milestone names or IDs for the issues search endpoint. */
+  milestones?: string;
+  /** Only show items updated after this RFC 3339 timestamp. */
+  since?: string;
+  /** Only show items updated before this RFC 3339 timestamp. */
+  before?: string;
+  /** Only show items created by this user. */
+  createdBy?: string;
+  /** Only show items assigned to this user. */
+  assignedBy?: string;
+  /** Only show items mentioning this user. */
+  mentionedBy?: string;
+  /** Sort order accepted by the Forgejo issues search API. */
+  sort?: string;
+}
 
 export interface PullRequest {
   id: number;
