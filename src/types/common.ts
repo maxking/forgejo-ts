@@ -64,3 +64,27 @@ export interface RepositoryInfo {
   default_branch: string;
   owner: User;
 }
+
+export interface RepositoryBranch {
+  name: string;
+  commit?: {
+    id?: string;
+    sha?: string;
+  };
+}
+
+export interface RepositoryContentEntry {
+  type: string;
+  name: string;
+  path: string;
+  sha?: string;
+  size?: number;
+  content?: string;
+  encoding?: string;
+  html_url?: string;
+  download_url?: string;
+}
+
+export interface RepositoryContentOptions extends PaginationOptions {
+  ref?: string;
+}
