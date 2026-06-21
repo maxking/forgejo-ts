@@ -8,7 +8,8 @@ import {
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
-  CreateRepositoryOptions, RepositoryInfo, PaginatedResult, RepositorySearchOptions,
+  CreateRepositoryOptions, RepositoryInfo, PaginatedResult, PaginationOptions, RepositorySearchOptions,
+  RepositoryBranch, RepositoryContentEntry, RepositoryContentOptions,
 } from './types/index.js';
 
 export interface ForgejoClientOptions {
@@ -139,6 +140,10 @@ export class ForgejoClient {
     if (value !== undefined && value !== '') {
       params.set(key, String(value));
     }
+  }
+
+  private encodePath(path: string): string {
+    return path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
   }
 
   private async collectAllPages<T>(fetchPage: (page: number) => Promise<PaginatedResult<T>>): Promise<T[]> {
@@ -593,8 +598,41 @@ export class ForgejoClient {
 
   // ======================== Files ========================
 
+  async listBranches(owner: string, repo: string, options: PaginationOptions = {}): Promise<RepositoryBranch[]> {
+    return this.collectAllPages(page => this.listBranchesPage(owner, repo, { ...options, page }));
+  }
+
+  async listBranchesPage(
+    owner: string,
+    repo: string,
+    options: PaginationOptions = {}
+  ): Promise<PaginatedResult<RepositoryBranch>> {
+    return this.requestPage<RepositoryBranch>(
+      `/repos/${owner}/${repo}/branches`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+  }
+
+  async getRepositoryContents(
+    owner: string,
+    repo: string,
+    path = '',
+    options: RepositoryContentOptions = {}
+  ): Promise<RepositoryContentEntry | RepositoryContentEntry[]> {
+    const params = new URLSearchParams();
+    this.appendParam(params, 'ref', options.ref);
+    this.appendParam(params, 'page', options.page);
+    this.appendParam(params, 'limit', options.limit);
+    const encodedPath = this.encodePath(path);
+    const query = params.size > 0 ? `?${params}` : '';
+    return this.request<RepositoryContentEntry | RepositoryContentEntry[]>(
+      `/repos/${owner}/${repo}/contents${encodedPath ? `/${encodedPath}` : ''}${query}`
+    );
+  }
+
   async getFileContents(owner: string, repo: string, filepath: string, ref: string): Promise<string> {
-    const encodedPath = filepath.split('/').map(encodeURIComponent).join('/');
+    const encodedPath = this.encodePath(filepath);
     const endpoint = `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`;
     const response = await this.request<FileContentsResponse>(endpoint);
 

@@ -702,6 +702,76 @@ describe('getIssueTimeline', () => {
 
 // ==================== Files ====================
 
+describe('listBranches', () => {
+  test('fetches all branch pages', async () => {
+    mockTwoPageArrayResponse(index => ({ name: `branch-${index}` }));
+
+    const result = await client.listBranches('owner', 'repo');
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/branches');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      name: `branch-${i + 1}`
+    })));
+  });
+
+  test('fetches one branch page with metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ name: 'main' }], 200, { 'x-total-count': '2' }));
+
+    const result = await client.listBranchesPage('owner', 'repo', { page: 1, limit: 1 });
+
+    expect(result).toEqual({
+      items: [{ name: 'main' }],
+      page: 1,
+      limit: 1,
+      totalCount: 2,
+      hasMore: true
+    });
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/branches');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('1');
+  });
+});
+
+describe('getRepositoryContents', () => {
+  test('fetches repository root contents with ref and pagination bounds', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([
+      { type: 'file', name: 'README.md', path: 'README.md' }
+    ]));
+
+    const result = await client.getRepositoryContents('owner', 'repo', '', {
+      ref: 'main',
+      page: 1,
+      limit: 100
+    });
+
+    expect(result).toEqual([{ type: 'file', name: 'README.md', path: 'README.md' }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/contents');
+    expect(url.searchParams.get('ref')).toBe('main');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('100');
+  });
+
+  test('encodes nested content paths and branch refs', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      type: 'file',
+      name: 'file with spaces.ts',
+      path: 'src/file with spaces.ts',
+      content: '',
+      encoding: 'base64'
+    }));
+
+    await client.getRepositoryContents('owner', 'repo', 'src/file with spaces.ts', {
+      ref: 'feature/browser'
+    });
+
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/contents/src/file%20with%20spaces.ts');
+    expect(url.searchParams.get('ref')).toBe('feature/browser');
+  });
+});
+
 describe('getFileContents', () => {
   test('decodes base64 content', async () => {
     const encoded = Buffer.from('hello world').toString('base64');

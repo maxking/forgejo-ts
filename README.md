@@ -4,6 +4,10 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
+### 0.4.1
+
+* Add typed repository branch and contents APIs, including page-level branch listing and bounded contents requests for remote repository browsers.
+
 ### 0.4.0
 
 * Add typed page-level list/search APIs for pull requests, issues, PR files, reviews, comments, timelines, workflow runs, statuses, tags, releases, and repository search.

@@ -6,7 +6,10 @@ export {
   PaginatedResult,
   RepositorySearchOptions,
   CreateRepositoryOptions,
-  RepositoryInfo
+  RepositoryInfo,
+  RepositoryBranch,
+  RepositoryContentEntry,
+  RepositoryContentOptions
 } from './common.js';
 export {
   PullRequestListOptions,
