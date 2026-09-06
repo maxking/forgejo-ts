@@ -44,7 +44,7 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 npm install forgejo-ts
 
 # Or directly from git
-npm install git+https://git.araj.me/maxking/forgejo-ts.git
+npm install git+https://github.com/maxking/forgejo-ts.git
 ```
 
 ## Quick Start
