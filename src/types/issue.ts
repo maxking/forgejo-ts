@@ -1,4 +1,4 @@
-import { User, UserRef, Label, PaginationOptions } from './common.js';
+import { User, UserRef, Label, Milestone, PaginationOptions } from './common.js';
 
 export type IssueState = 'open' | 'closed' | 'all';
 export type IssueSort = 'oldest' | 'recentupdate' | 'leastupdate' | 'mostcomment' | 'leastcomment' | 'priority';
@@ -26,6 +26,38 @@ export interface IssueListOptions extends PaginationOptions {
   sort?: IssueSort | string;
 }
 
+/** Options accepted by `POST /repos/{owner}/{repo}/issues`. */
+export interface CreateIssueOptions {
+  /** Label IDs to attach to the new issue. */
+  labels?: number[];
+  /** Usernames to assign to the new issue. */
+  assignees?: string[];
+  /** Milestone ID to attach to the new issue. */
+  milestone?: number;
+  /** Due date as an RFC 3339 timestamp. */
+  due_date?: string;
+}
+
+/**
+ * Fields accepted by `PATCH /repos/{owner}/{repo}/issues/{index}`.
+ *
+ * The issues endpoint's `milestone` is a pointer in Forgejo's API, so an
+ * explicit `0` unsets the milestone and omitting the field leaves it
+ * unchanged. Forgejo stores pull requests as issues internally, so this
+ * endpoint (and thus `updateIssue`) also accepts a pull request's index —
+ * unlike the `/pulls/{index}` edit endpoint, whose milestone field cannot
+ * represent "unset".
+ */
+export interface UpdateIssueOptions {
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  /** Full replacement list of assignee usernames; pass `[]` to clear all assignees. */
+  assignees?: string[];
+  /** Milestone ID; pass `0` to unset, omit to leave unchanged. */
+  milestone?: number;
+}
+
 export interface Issue {
   id: number;
   number: number;
@@ -35,6 +67,7 @@ export interface Issue {
   user: User;
   labels: Label[];
   assignees: UserRef[];
+  milestone?: Milestone | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
