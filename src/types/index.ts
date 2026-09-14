@@ -2,6 +2,9 @@ export {
   User,
   UserRef,
   Label,
+  Milestone,
+  MilestoneListOptions,
+  AssignableUser,
   PaginationOptions,
   PaginatedResult,
   RepositorySearchOptions,
@@ -20,7 +23,8 @@ export {
   FileContentsResponse,
   CommitStatus,
   PullRequestReview,
-  PullRequestCommit
+  PullRequestCommit,
+  UpdatePullRequestOptions
 } from './pull-request.js';
 export {
   IssueState,
@@ -28,7 +32,9 @@ export {
   Issue,
   IssueListItem,
   IssueComment,
-  TimelineEvent
+  TimelineEvent,
+  CreateIssueOptions,
+  UpdateIssueOptions
 } from './issue.js';
 export {
   ActionTasksResponse,

@@ -11,9 +11,33 @@ export interface UserRef {
   login: string;
 }
 
+/**
+ * Label as returned by repository and issue/PR label endpoints. `id` is
+ * present in API responses and is required to edit an issue/PR's labels
+ * (label edits are expressed as lists of label IDs), but is optional here
+ * so existing consumers that construct `Label` values keep compiling.
+ */
 export interface Label {
+  id?: number;
   name: string;
   color: string;
+  description?: string;
+}
+
+/** Milestone as returned by `GET /repos/{owner}/{repo}/milestones` and embedded in issues/PRs. */
+export interface Milestone {
+  id: number;
+  title: string;
+  state: 'open' | 'closed';
+  description?: string;
+  due_on?: string | null;
+}
+
+/** User eligible to be assigned to a repository's issues/PRs, as returned by `GET /repos/{owner}/{repo}/assignees`. */
+export interface AssignableUser {
+  id: number;
+  login: string;
+  avatar_url?: string;
 }
 
 export interface PaginationOptions {
@@ -33,6 +57,11 @@ export interface PaginatedResult<T> {
 
 export interface RepositorySearchOptions extends PaginationOptions {
   query?: string;
+}
+
+export interface MilestoneListOptions extends PaginationOptions {
+  /** Filter by milestone state. Defaults to 'open' on the Forgejo API side. */
+  state?: 'open' | 'closed' | 'all';
 }
 
 export interface CreateRepositoryOptions {

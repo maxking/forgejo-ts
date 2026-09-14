@@ -4,6 +4,12 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ## News
 
+### 0.5.0
+
+* Add typed issue/PR metadata APIs: `listRepoLabels`, `listMilestones` (each with a page-level variant), `setIssueLabels` for replacing an issue/PR's full label set, and `listAssignableUsers` (a single request — Forgejo's assignees endpoint is not paginated).
+* Widen `updateIssue`/`updatePullRequest` to accept `assignees` and `milestone`, and `createIssue` to accept `labels`, `assignees`, `milestone`, and `due_date` options.
+* Widen `Issue`/`PullRequest` types with `milestone`, add optional `id`/`description` to `Label`, and add `Milestone`/`AssignableUser` types.
+
 ### 0.4.1
 
 * Add typed repository branch and contents APIs, including page-level branch listing and bounded contents requests for remote repository browsers.
@@ -121,7 +127,7 @@ new ForgejoClient(options: {
 | | `searchPullRequestsPage(owner, repo, options)` | Search one PR page by title/body with pagination metadata |
 | | `getPullRequest(owner, repo, number)` | Get PR details |
 | | `createPullRequest(owner, repo, title, head, base, body?)` | Create a PR |
-| | `updatePullRequest(owner, repo, number, updates)` | Update PR title/body/state |
+| | `updatePullRequest(owner, repo, number, updates)` | Update PR title/body/state/assignees/milestone |
 | | `mergePullRequest(owner, repo, number, method?, deleteBranch?)` | Merge a PR |
 | | `closePullRequest(owner, repo, number)` | Close a PR |
 | | `getPullRequestFiles(owner, repo, number)` | List changed files (paginates automatically) |
@@ -140,13 +146,20 @@ new ForgejoClient(options: {
 | | `listIssues(owner, repo, stateOrOptions?)` | List issues (PRs filtered out, paginates automatically); accepts state string or `{ state, query }` |
 | | `listIssuesPage(owner, repo, options?)` | List/search one issue page with pagination metadata |
 | | `getIssue(owner, repo, number)` | Get issue details |
-| | `createIssue(owner, repo, title, body?)` | Create an issue |
-| | `updateIssue(owner, repo, number, updates)` | Update issue title/body/state |
+| | `createIssue(owner, repo, title, body?, options?)` | Create an issue, optionally with labels/assignees/milestone/due date |
+| | `updateIssue(owner, repo, number, updates)` | Update issue title/body/state/assignees/milestone (`milestone: 0` unsets) |
 | | `getIssueComments(owner, repo, number)` | List comments (paginates automatically) |
 | | `getIssueCommentsPage(owner, repo, number, options?)` | List one issue-comment page |
 | | `createComment(owner, repo, number, body)` | Add a comment |
 | | `getIssueTimeline(owner, repo, number)` | Get timeline events (paginates automatically) |
 | | `getIssueTimelinePage(owner, repo, number, options?)` | Get one timeline page |
+| | `setIssueLabels(owner, repo, number, labelIds)` | Replace an issue/PR's full label set (empty array clears) |
+| **Labels, Milestones & Assignees** | | |
+| | `listRepoLabels(owner, repo, options?)` | List repository labels (paginates automatically) |
+| | `listRepoLabelsPage(owner, repo, options?)` | List one label page |
+| | `listMilestones(owner, repo, options?)` | List milestones (paginates automatically) |
+| | `listMilestonesPage(owner, repo, options?)` | List one milestone page |
+| | `listAssignableUsers(owner, repo)` | List users assignable to issues/PRs (complete list, single request) |
 | **Repositories** | | |
 | | `createRepository(options)` | Create a repository for the authenticated user |
 | | `createOrgRepository(org, options)` | Create a repository in an organization |

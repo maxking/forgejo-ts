@@ -389,6 +389,19 @@ describe('updatePullRequest', () => {
     const result = await client.updatePullRequest('owner', 'repo', 1, { title: 'Updated', state: 'closed' });
     expect(result).toEqual(pr);
   });
+
+  test('updates PR assignees and milestone', async () => {
+    const pr = { number: 1, milestone: { id: 2, title: 'v1.0' } };
+    mockFetch.mockResolvedValueOnce(jsonResponse(pr));
+
+    const result = await client.updatePullRequest('owner', 'repo', 1, { assignees: ['alice'], milestone: 2 });
+
+    expect(result).toEqual(pr);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(new URL(String(url)).pathname).toBe('/api/v1/repos/owner/repo/pulls/1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ assignees: ['alice'], milestone: 2 });
+  });
 });
 
 describe('mergePullRequest', () => {
@@ -637,6 +650,29 @@ describe('createIssue', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(issue, 201));
     const result = await client.createIssue('owner', 'repo', 'New issue', 'body text');
     expect(result).toEqual(issue);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(new URL(String(url)).pathname).toBe('/api/v1/repos/owner/repo/issues');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({ title: 'New issue', body: 'body text' });
+  });
+
+  test('creates an issue with labels, assignees, milestone and due date', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ number: 11 }, 201));
+
+    await client.createIssue('owner', 'repo', 'New issue', undefined, {
+      labels: [1, 2],
+      assignees: ['alice'],
+      milestone: 3,
+      due_date: '2026-01-01T00:00:00Z'
+    });
+
+    expect(JSON.parse(String((mockFetch.mock.calls[0][1] as RequestInit).body))).toEqual({
+      title: 'New issue',
+      labels: [1, 2],
+      assignees: ['alice'],
+      milestone: 3,
+      due_date: '2026-01-01T00:00:00Z'
+    });
   });
 });
 
@@ -646,6 +682,157 @@ describe('updateIssue', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(issue));
     const result = await client.updateIssue('owner', 'repo', 5, { state: 'closed' });
     expect(result).toEqual(issue);
+  });
+
+  test('updates issue assignees and milestone', async () => {
+    const issue = { number: 5, milestone: { id: 2, title: 'v1.0' } };
+    mockFetch.mockResolvedValueOnce(jsonResponse(issue));
+
+    const result = await client.updateIssue('owner', 'repo', 5, { assignees: ['alice'], milestone: 2 });
+
+    expect(result).toEqual(issue);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(new URL(String(url)).pathname).toBe('/api/v1/repos/owner/repo/issues/5');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ assignees: ['alice'], milestone: 2 });
+  });
+
+  test('unsets issue milestone with explicit zero', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ number: 5, milestone: null }));
+
+    await client.updateIssue('owner', 'repo', 5, { milestone: 0 });
+
+    expect(JSON.parse(String((mockFetch.mock.calls[0][1] as RequestInit).body))).toEqual({ milestone: 0 });
+  });
+});
+
+describe('setIssueLabels', () => {
+  test('replaces the full label set and returns resulting labels', async () => {
+    const labels = [
+      { id: 1, name: 'bug', color: 'ff0000' },
+      { id: 3, name: 'help wanted', color: '00ff00' }
+    ];
+    mockFetch.mockResolvedValueOnce(jsonResponse(labels));
+
+    const result = await client.setIssueLabels('owner', 'repo', 7, [1, 3]);
+
+    expect(result).toEqual(labels);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(new URL(String(url)).pathname).toBe('/api/v1/repos/owner/repo/issues/7/labels');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({ labels: [1, 3] });
+  });
+
+  test('accepts a PR index (PRs are issues internally)', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    await client.setIssueLabels('owner', 'repo', 12, []);
+
+    expect(new URL(String(mockFetch.mock.calls[0][0])).pathname).toBe('/api/v1/repos/owner/repo/issues/12/labels');
+  });
+});
+
+describe('listRepoLabels', () => {
+  test('fetches all label pages', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, name: `label-${index}`, color: 'ff0000' }));
+
+    const result = await client.listRepoLabels('owner', 'repo');
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/labels');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      name: `label-${i + 1}`,
+      color: 'ff0000'
+    })));
+  });
+
+  test('fetches one label page with metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 1, name: 'bug', color: 'ff0000' }], 200, { 'x-total-count': '3' }));
+
+    const result = await client.listRepoLabelsPage('owner', 'repo', { page: 1, limit: 1 });
+
+    expect(result).toEqual({
+      items: [{ id: 1, name: 'bug', color: 'ff0000' }],
+      page: 1,
+      limit: 1,
+      totalCount: 3,
+      hasMore: true
+    });
+  });
+
+  test('fetches one label page with defaults', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+
+    const result = await client.listRepoLabelsPage('owner', 'repo');
+
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(50);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/labels');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('50');
+  });
+});
+
+describe('listMilestones', () => {
+  test('fetches all milestone pages with state filter', async () => {
+    mockTwoPageArrayResponse(index => ({ id: index, title: `v0.${index}`, state: 'open' }));
+
+    const result = await client.listMilestones('owner', 'repo', { state: 'open' });
+    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/milestones');
+
+    const firstUrl = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(firstUrl.searchParams.get('state')).toBe('open');
+
+    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
+      id: i + 1,
+      title: `v0.${i + 1}`,
+      state: 'open'
+    })));
+  });
+
+  test('fetches one milestone page with metadata', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 2, title: 'v1.0', state: 'open' }], 200, { 'x-total-count': '2' }));
+
+    const result = await client.listMilestonesPage('owner', 'repo', { page: 1, limit: 1, state: 'closed' });
+
+    expect(result.items).toEqual([{ id: 2, title: 'v1.0', state: 'open' }]);
+    expect(result.hasMore).toBe(true);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/milestones');
+    expect(url.searchParams.get('state')).toBe('closed');
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('1');
+  });
+
+  test('fetches one milestone page without a state filter', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 1, title: 'v0.1', state: 'open' }]));
+
+    const result = await client.listMilestonesPage('owner', 'repo');
+
+    expect(result.items).toEqual([{ id: 1, title: 'v0.1', state: 'open' }]);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/milestones');
+    expect(url.searchParams.has('state')).toBe(false);
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('50');
+  });
+});
+
+describe('listAssignableUsers', () => {
+  test('fetches the complete assignee list in one request', async () => {
+    const users = [{ id: 1, login: 'alice' }, { id: 2, login: 'bob' }];
+    mockFetch.mockResolvedValueOnce(jsonResponse(users));
+
+    const result = await client.listAssignableUsers('owner', 'repo');
+
+    expect(result).toEqual(users);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.pathname).toBe('/api/v1/repos/owner/repo/assignees');
+    // Forgejo does not paginate this endpoint; no page/limit params are sent.
+    expect(url.searchParams.has('page')).toBe(false);
+    expect(url.searchParams.has('limit')).toBe(false);
   });
 });
 

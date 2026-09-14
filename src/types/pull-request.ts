@@ -1,4 +1,4 @@
-import { User, UserRef, Label, PaginationOptions } from './common.js';
+import { User, UserRef, Label, Milestone, PaginationOptions } from './common.js';
 import type { IssueState } from './issue.js';
 
 export interface PullRequestListOptions extends PaginationOptions {
@@ -39,6 +39,25 @@ export interface PullRequestSearchOptions extends PaginationOptions {
   sort?: string;
 }
 
+/**
+ * Fields accepted by `PATCH /repos/{owner}/{repo}/pulls/{index}`.
+ *
+ * Caveat: the pulls endpoint's `milestone` is a non-pointer `int64` guarded
+ * by `form.Milestone != 0` in Forgejo, so `0` means "leave unchanged" and a
+ * PR's milestone cannot be *unset* through this endpoint. To unset it, use
+ * `updateIssue` with `milestone: 0` — pull requests are issues internally, so
+ * the issues edit endpoint accepts a PR's index too.
+ */
+export interface UpdatePullRequestOptions {
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  /** Full replacement list of assignee usernames; pass `[]` to clear all assignees. */
+  assignees?: string[];
+  /** Milestone ID; `0` leaves the milestone unchanged (see caveat above). */
+  milestone?: number;
+}
+
 export interface PullRequest {
   id: number;
   number: number;
@@ -46,6 +65,8 @@ export interface PullRequest {
   body: string;
   state: 'open' | 'closed';
   user: User;
+  assignees?: UserRef[];
+  milestone?: Milestone | null;
   created_at: string;
   updated_at: string;
   html_url: string;

@@ -3,13 +3,15 @@ import { ForgejoLogger, noopLogger } from './logger.js';
 import {
   PullRequest, PullRequestListItem, PullRequestListOptions, PullRequestSearchOptions, PullRequestFile,
   FileContentsResponse, CommitStatus, PullRequestReview, PullRequestCommit,
-  Issue, IssueListItem, IssueListOptions, IssueComment, TimelineEvent,
+  Issue, IssueListItem, IssueListOptions, IssueComment, TimelineEvent, CreateIssueOptions, UpdateIssueOptions,
   ActionTasksResponse, WorkflowRunListItem, WorkflowRun, WorkflowJobsResponse, WorkflowJobRef,
   ReviewComment, PullReview, CreatePullReviewOptions,
   Tag, CreateTagOptions,
   Release, CreateReleaseOptions,
   CreateRepositoryOptions, RepositoryInfo, PaginatedResult, PaginationOptions, RepositorySearchOptions,
   RepositoryBranch, RepositoryContentEntry, RepositoryContentOptions,
+  Label, Milestone, MilestoneListOptions, AssignableUser,
+  UpdatePullRequestOptions,
 } from './types/index.js';
 
 export interface ForgejoClientOptions {
@@ -370,7 +372,7 @@ export class ForgejoClient {
 
   async updatePullRequest(
     owner: string, repo: string, number: number,
-    updates: { title?: string; body?: string; state?: 'open' | 'closed' }
+    updates: UpdatePullRequestOptions
   ): Promise<PullRequest> {
     return this.requestWithBody<PullRequest>('PATCH', `/repos/${owner}/${repo}/pulls/${number}`, updates);
   }
@@ -545,17 +547,37 @@ export class ForgejoClient {
     return this.request<Issue>(`/repos/${owner}/${repo}/issues/${number}`);
   }
 
-  async createIssue(owner: string, repo: string, title: string, body?: string): Promise<Issue> {
-    const payload: Record<string, string> = { title };
-    if (body) payload.body = body;
+  async createIssue(
+    owner: string, repo: string, title: string, body?: string,
+    options: CreateIssueOptions = {}
+  ): Promise<Issue> {
+    const payload: Record<string, unknown> = { title };
+    if (body !== undefined) payload.body = body;
+    if (options.labels !== undefined) payload.labels = options.labels;
+    if (options.assignees !== undefined) payload.assignees = options.assignees;
+    if (options.milestone !== undefined) payload.milestone = options.milestone;
+    if (options.due_date !== undefined) payload.due_date = options.due_date;
     return this.requestWithBody<Issue>('POST', `/repos/${owner}/${repo}/issues`, payload);
   }
 
   async updateIssue(
     owner: string, repo: string, number: number,
-    updates: { title?: string; body?: string; state?: 'open' | 'closed' }
+    updates: UpdateIssueOptions
   ): Promise<Issue> {
     return this.requestWithBody<Issue>('PATCH', `/repos/${owner}/${repo}/issues/${number}`, updates);
+  }
+
+  /**
+   * Replaces the full label set on an issue or pull request.
+   *
+   * Forgejo's issue/PR edit payloads (`EditIssueOption`) have no `labels`
+   * field at all — labels are only editable through this dedicated
+   * endpoint, `PUT /repos/{owner}/{repo}/issues/{index}/labels`. The same
+   * path works for pull request indices since PRs are issues internally.
+   * Pass an empty array to clear all labels.
+   */
+  async setIssueLabels(owner: string, repo: string, number: number, labelIds: number[]): Promise<Label[]> {
+    return this.requestWithBody<Label[]>('PUT', `/repos/${owner}/${repo}/issues/${number}/labels`, { labels: labelIds });
   }
 
   async getIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]> {
@@ -594,6 +616,53 @@ export class ForgejoClient {
       options.page ?? 1,
       options.limit ?? 50
     );
+  }
+
+  // ======================== Labels, Milestones & Assignees ========================
+
+  async listRepoLabels(owner: string, repo: string, options: PaginationOptions = {}): Promise<Label[]> {
+    return this.collectAllPages(page => this.listRepoLabelsPage(owner, repo, { ...options, page }));
+  }
+
+  async listRepoLabelsPage(
+    owner: string, repo: string,
+    options: PaginationOptions = {}
+  ): Promise<PaginatedResult<Label>> {
+    return this.requestPage<Label>(
+      `/repos/${owner}/${repo}/labels`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+  }
+
+  async listMilestones(owner: string, repo: string, options: MilestoneListOptions = {}): Promise<Milestone[]> {
+    return this.collectAllPages(page => this.listMilestonesPage(owner, repo, { ...options, page }));
+  }
+
+  async listMilestonesPage(
+    owner: string, repo: string,
+    options: MilestoneListOptions = {}
+  ): Promise<PaginatedResult<Milestone>> {
+    const params = new URLSearchParams();
+    this.appendParam(params, 'state', options.state);
+    const query = params.size > 0 ? `?${params}` : '';
+    return this.requestPage<Milestone>(
+      `/repos/${owner}/${repo}/milestones${query}`,
+      options.page ?? 1,
+      options.limit ?? 50
+    );
+  }
+
+  /**
+   * Lists users eligible for assignment on a repository's issues/PRs.
+   *
+   * Forgejo's assignees endpoint (`GET /repos/{owner}/{repo}/assignees`,
+   * `GetAssignees` in `routers/api/v1/repo/collaborators.go`) returns the
+   * complete assignee list and consumes no `page`/`limit` parameters, so
+   * this is a single request — not a paginated list method.
+   */
+  async listAssignableUsers(owner: string, repo: string): Promise<AssignableUser[]> {
+    return this.request<AssignableUser[]>(`/repos/${owner}/${repo}/assignees`);
   }
 
   // ======================== Files ========================
