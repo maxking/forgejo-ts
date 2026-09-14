@@ -820,41 +820,19 @@ describe('listMilestones', () => {
 });
 
 describe('listAssignableUsers', () => {
-  test('fetches all assignable-user pages', async () => {
-    mockTwoPageArrayResponse(index => ({ id: index, login: `user-${index}` }));
+  test('fetches the complete assignee list in one request', async () => {
+    const users = [{ id: 1, login: 'alice' }, { id: 2, login: 'bob' }];
+    mockFetch.mockResolvedValueOnce(jsonResponse(users));
 
     const result = await client.listAssignableUsers('owner', 'repo');
-    const limit = expectTwoPageArrayRequests('/api/v1/repos/owner/repo/assignees');
 
-    expect(result).toEqual(Array.from({ length: limit + 1 }, (_, i) => ({
-      id: i + 1,
-      login: `user-${i + 1}`
-    })));
-  });
-
-  test('fetches one assignable-user page with metadata', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 1, login: 'alice' }], 200, { 'x-total-count': '5' }));
-
-    const result = await client.listAssignableUsersPage('owner', 'repo', { page: 1, limit: 1 });
-
-    expect(result).toEqual({
-      items: [{ id: 1, login: 'alice' }],
-      page: 1,
-      limit: 1,
-      totalCount: 5,
-      hasMore: true
-    });
-  });
-
-  test('fetches one assignable-user page with defaults', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([{ id: 1, login: 'alice' }]));
-
-    const result = await client.listAssignableUsersPage('owner', 'repo');
-
-    expect(result.page).toBe(1);
-    expect(result.limit).toBe(50);
+    expect(result).toEqual(users);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     const url = new URL(String(mockFetch.mock.calls[0][0]));
     expect(url.pathname).toBe('/api/v1/repos/owner/repo/assignees');
+    // Forgejo does not paginate this endpoint; no page/limit params are sent.
+    expect(url.searchParams.has('page')).toBe(false);
+    expect(url.searchParams.has('limit')).toBe(false);
   });
 });
 

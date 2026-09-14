@@ -6,9 +6,9 @@ Zero-dependency TypeScript client for the [Forgejo](https://forgejo.org/) REST A
 
 ### 0.5.0
 
-* Add typed issue/PR metadata APIs: `listRepoLabels`, `listMilestones`, `listAssignableUsers` (each with a page-level variant), and `setIssueLabels` for replacing an issue/PR's full label set.
+* Add typed issue/PR metadata APIs: `listRepoLabels`, `listMilestones` (each with a page-level variant), `setIssueLabels` for replacing an issue/PR's full label set, and `listAssignableUsers` (a single request — Forgejo's assignees endpoint is not paginated).
 * Widen `updateIssue`/`updatePullRequest` to accept `assignees` and `milestone`, and `createIssue` to accept `labels`, `assignees`, `milestone`, and `due_date` options.
-* Widen `Issue`/`PullRequest` types with `milestone`, add `id`/`description` to `Label`, and add `Milestone`/`AssignableUser` types.
+* Widen `Issue`/`PullRequest` types with `milestone`, add optional `id`/`description` to `Label`, and add `Milestone`/`AssignableUser` types.
 
 ### 0.4.1
 
@@ -159,8 +159,7 @@ new ForgejoClient(options: {
 | | `listRepoLabelsPage(owner, repo, options?)` | List one label page |
 | | `listMilestones(owner, repo, options?)` | List milestones (paginates automatically) |
 | | `listMilestonesPage(owner, repo, options?)` | List one milestone page |
-| | `listAssignableUsers(owner, repo, options?)` | List users assignable to issues/PRs (paginates automatically) |
-| | `listAssignableUsersPage(owner, repo, options?)` | List one assignable-user page |
+| | `listAssignableUsers(owner, repo)` | List users assignable to issues/PRs (complete list, single request) |
 | **Repositories** | | |
 | | `createRepository(options)` | Create a repository for the authenticated user |
 | | `createOrgRepository(org, options)` | Create a repository in an organization |

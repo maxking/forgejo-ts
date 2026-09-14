@@ -13,11 +13,12 @@ export interface UserRef {
 
 /**
  * Label as returned by repository and issue/PR label endpoints. `id` is
- * always present in API responses and is required to edit an issue/PR's
- * labels (label edits are expressed as lists of label IDs).
+ * present in API responses and is required to edit an issue/PR's labels
+ * (label edits are expressed as lists of label IDs), but is optional here
+ * so existing consumers that construct `Label` values keep compiling.
  */
 export interface Label {
-  id: number;
+  id?: number;
   name: string;
   color: string;
   description?: string;

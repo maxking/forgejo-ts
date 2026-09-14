@@ -653,19 +653,16 @@ export class ForgejoClient {
     );
   }
 
-  async listAssignableUsers(owner: string, repo: string, options: PaginationOptions = {}): Promise<AssignableUser[]> {
-    return this.collectAllPages(page => this.listAssignableUsersPage(owner, repo, { ...options, page }));
-  }
-
-  async listAssignableUsersPage(
-    owner: string, repo: string,
-    options: PaginationOptions = {}
-  ): Promise<PaginatedResult<AssignableUser>> {
-    return this.requestPage<AssignableUser>(
-      `/repos/${owner}/${repo}/assignees`,
-      options.page ?? 1,
-      options.limit ?? 50
-    );
+  /**
+   * Lists users eligible for assignment on a repository's issues/PRs.
+   *
+   * Forgejo's assignees endpoint (`GET /repos/{owner}/{repo}/assignees`,
+   * `GetAssignees` in `routers/api/v1/repo/collaborators.go`) returns the
+   * complete assignee list and consumes no `page`/`limit` parameters, so
+   * this is a single request — not a paginated list method.
+   */
+  async listAssignableUsers(owner: string, repo: string): Promise<AssignableUser[]> {
+    return this.request<AssignableUser[]>(`/repos/${owner}/${repo}/assignees`);
   }
 
   // ======================== Files ========================
